@@ -1,7 +1,16 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
+import dotenv from  'dotenv'
 
+dotenv.config()
+
+
+
+// const databaseUrl = process.env.DATABASE_URL;
+
+const corsUrl = process.env.CORS_URL
+const port = process.env.PORT;
 
 const app = express();
 const server = createServer(app);
@@ -10,7 +19,7 @@ const server = createServer(app);
 
 const io = new Server(server, {
   cors:{
-    origin:'http://localhost:3000',
+    origin:corsUrl,
     methods:['GET', 'POST']
   }
 })
@@ -28,7 +37,7 @@ io.on('connection',(socket)=>{
 })
 
 const serverIsRunning = () => {
-  console.log('Server is running');
+  console.log('Server is running', port);
 }
 
-server.listen(3001, serverIsRunning);
+server.listen(port, serverIsRunning);
