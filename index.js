@@ -10,7 +10,6 @@ const port = process.env.PORT;
 const app = express();
 
 const server = createServer(app);
-
 createSocketConnection(server)
 
 const serverIsRunning = () => {

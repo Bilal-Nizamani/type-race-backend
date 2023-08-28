@@ -6,23 +6,22 @@ import globalSocketHandler from "../handlers/sockets-handlers/globalSocketHandle
 
   const createSocketConnection = (server)=>{
     const corsUrl = process.env.CORS_URL
+         const  io = new Server(server, {
+    cors:{
+        origin:corsUrl,
+        methods:['GET', 'POST']
+    }
+    })
 
+    io.on('connection',(socket)=>{ 
+        socket.emit('total_connections',io.engine.clientsCount)
+        socket.on('disconnect',()=>{ })
 
-
-    const io = new Server(server, {
-        cors:{
-          origin:corsUrl,
-          methods:['GET', 'POST']
-        }
-      })
-
-    io.on('connection',(socket)=>{  
-
-        gameSocketHandler(socket)
+        gameSocketHandler(socket,io)
         globalSocketHandler(socket)
+})
 
-      
-      })
+
   }
 
   export default createSocketConnection
