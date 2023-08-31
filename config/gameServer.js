@@ -1,7 +1,7 @@
 import { v4 } from "uuid";
 
 /**  
-*?RoomTimer  || handles every single room timer
+*?RoomTimer    || handles every single room timer
  timer_update  ||| emits every second game duration
  time_up       ||| emits when timer is reached its duration
 */
@@ -50,7 +50,8 @@ class RoomTimer {
 class GameServer {
   constructor(io) {
     this.io = io;
-    this.waitingPlayers = [];
+    // changed to set to prevent users from being duplicate
+    this.waitingPlayers = new Set();
     this.playingPlayersData = {};
     this.rooms = {};
     this.playerToRoomMap = {};
@@ -64,14 +65,20 @@ class GameServer {
   };
 
   playersWantToPlayHandler = (socket) => () => {
-    this.waitingPlayers.push(socket.id);
-    const roomCapacity = 4; // Change to 4 for room capacity
-    if (this.waitingPlayers.length >= roomCapacity) {
+    this.waitingPlayers.add(socket.id); // Changed to add
+    const roomCapacity = 2; // Change to 4 for room capacity
+    if (this.waitingPlayers.size >= roomCapacity) {
+      // Changed to size
       let timer = "";
 
       const matchRoomName = "match_" + v4();
-      const players = this.waitingPlayers.splice(0, roomCapacity);
+      // Iterate over waitingPlayers and add to players array
+      const players = [...this.waitingPlayers].splice(0, roomCapacity);
 
+      // Remove selected players from waitingPlayers
+      for (const player of players) {
+        this.waitingPlayers.delete(player);
+      }
       this.rooms[matchRoomName] = {};
 
       players.forEach((player) => {
@@ -110,10 +117,7 @@ class GameServer {
 
   handleDisconnect = (socket) => () => {
     // Remove the user from waitingPlayers
-    const index = this.waitingPlayers.indexOf(socket.id);
-    if (index !== -1) {
-      this.waitingPlayers.splice(index, 1);
-    }
+    this.waitingPlayers.delete(socket.id);
 
     // Handle user disconnection from activeRooms
     const roomId = this.playerToRoomMap?.[socket.id];
