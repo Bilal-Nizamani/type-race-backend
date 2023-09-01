@@ -55,6 +55,7 @@ class GameServer {
     this.playingPlayersData = {};
     this.rooms = {};
     this.playerToRoomMap = {};
+    this.roomsTimer = {};
     this.io.on("connection", (socket) => this.handleConnection(socket));
   }
 
@@ -69,7 +70,6 @@ class GameServer {
     const roomCapacity = 2; // Change to 4 for room capacity
     if (this.waitingPlayers.size >= roomCapacity) {
       // Changed to size
-      let timer = "";
 
       const matchRoomName = "match_" + v4();
       // Iterate over waitingPlayers and add to players array
@@ -94,8 +94,12 @@ class GameServer {
       socket.on("game_started", (data) => {
         // Handle the "game_started" event from clients in this room
         // You can start the timer here
-        timer = new RoomTimer(this.io, 300, this.handleEmitEverySeconds);
-        timer.start(matchRoomName);
+        this.roomsTimer[matchRoomName] = new RoomTimer(
+          this.io,
+          300,
+          this.handleEmitEverySeconds
+        );
+        this.roomsTimer[matchRoomName].start(matchRoomName);
       });
 
       // Start the game in this room
@@ -109,10 +113,18 @@ class GameServer {
   // handling user data if anything changed
   handleUserData = (socket) => (userData) => {
     const roomId = this.playerToRoomMap[socket.id];
-    this.rooms[roomId][socket.id] = userData; // Store player data for the specific room and player
-
+    let room = this.rooms[roomId];
+    room[socket.id] = userData; // Store player data for the specific room and player
+    let timer = this.roomsTimer?.[roomId]?.duration;
+    if (timer) {
+      for (const property in room) {
+        room[property].wpm = Math.floor(
+          (room[property].arrayOfwrittenWords.length / (300 - timer)) * 60
+        );
+      }
+    }
     // Emit the updated data for all players in the match room
-    socket.to(roomId).emit("room_players_data", this.rooms[roomId]);
+    this.io.to(roomId).emit("room_players_data", room);
   };
 
   handleDisconnect = (socket) => () => {
