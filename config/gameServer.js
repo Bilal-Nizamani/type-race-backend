@@ -1,13 +1,22 @@
 import { v4 } from "uuid";
 
-/**  
+/** 
+* ?SOCKET.IO REQUEST
+  
 *?RoomTimer    || handles every single room timer
  timer_update  ||| emits every second game duration
  time_up       ||| emits when timer is reached its duration
 */
+/**  
+*?Counter      || handles every single room start counter
+ counter_update  ||| emits every second roomCounters run
+ *!callBack
+ this.callback ||| (1) calling call back funtion when counter is completed 
+                   (2) stop function is called from GameServer Class if only one player is left in rooms
+*/
 
 /** 
-*?GamerServer
+*?GamerServer      || handles games mani logic
  user_ready_to_play||| emits every second game duration
  player_data       ||| emits when timer is reached its duration
  game_started      ||| it listens on game_sarted to get track of when game is started
@@ -16,27 +25,23 @@ import { v4 } from "uuid";
 */
 
 class RoomTimer {
-  constructor(io, duration, callback) {
+  constructor(io, duration, roomName, callback) {
     this.io = io;
     this.duration = duration;
     this.callback = callback;
     this.timerInterval = null;
-    this.roomName = null;
+    this.roomName = roomName;
   }
 
-  start(roomName) {
-    this.roomName = roomName;
+  start() {
     this.timerInterval = setInterval(() => {
       this.duration--;
 
       if (this.duration <= 0) {
         this.stop();
-        // call_back_funtion
-        if (typeof this.callback === "function") {
-          this.callback(roomName);
-        }
       }
-      this.io.to(roomName).emit("timer_update", this.duration);
+      this.callback(this.roomName);
+      this.io.to(this.roomName).emit("timer_update", this.duration);
     }, 1000);
   }
 
@@ -44,6 +49,34 @@ class RoomTimer {
     clearInterval(this.timerInterval);
     this.timerInterval = null;
     this.io.to(this.roomName).emit("time_up", "time_up");
+  }
+}
+
+class RoomStartCounter {
+  constructor(io, counterCount, roomName, callback) {
+    this.io = io;
+    this.counterCount = counterCount;
+    this.callback = callback;
+    this.timerInterval = null;
+    this.roomName = roomName;
+  }
+
+  start() {
+    this.timerInterval = setInterval(() => {
+      if (this.counterCount <= 0) {
+        this.stop();
+        return;
+      }
+      this.io.to(this.roomName).emit("counter_update", this.counterCount);
+      this.counterCount--;
+    }, 1000);
+  }
+
+  stop() {
+    clearInterval(this.timerInterval);
+    this.timerInterval = null;
+    this.callback(this.roomName);
+    // this.io.to(this.roomName).emit("players_left", "Only you are in the Room");
   }
 }
 
@@ -56,6 +89,7 @@ class GameServer {
     this.rooms = {};
     this.playerToRoomMap = {};
     this.roomsTimer = {};
+    this.roomsCounters = {};
     this.io.on("connection", (socket) => this.handleConnection(socket));
   }
 
@@ -91,40 +125,83 @@ class GameServer {
         .to(matchRoomName)
         .emit("match_found", "lets check your typing speed how much you score");
 
+      this.roomsCounters[matchRoomName] = new RoomStartCounter(
+        this.io,
+        5,
+        matchRoomName,
+        this.handleCounterEnd
+      );
+
+      this.roomsCounters[matchRoomName].start();
+
       socket.on("game_started", (data) => {
         // Handle the "game_started" event from clients in this room
         // You can start the timer here
         this.roomsTimer[matchRoomName] = new RoomTimer(
           this.io,
           300,
-          this.handleEmitEverySeconds
+          matchRoomName,
+          this.hndlRomScndsTim
         );
-        this.roomsTimer[matchRoomName].start(matchRoomName);
+        this.roomsTimer[matchRoomName].start();
       });
-
       // Start the game in this room
       // You should implement your game logic here
     }
   };
-  handleEmitEverySeconds = (roomName) => {
-    this.io.to(roomName).emit();
+
+  handleCounterEnd = (roomId) => {
+    delete this.roomsCounters[roomId];
+    this.io.to(roomId).emit("counting_completed", "countingIsCompleted");
   };
 
-  // handling user data if anything changed
-  handleUserData = (socket) => (userData) => {
-    const roomId = this.playerToRoomMap[socket.id];
-    let room = this.rooms[roomId];
-    room[socket.id] = userData; // Store player data for the specific room and player
+  hndlRomScndsTim = (roomName) => {
+    let userData;
+    let socketIdKey;
+    for (const key in this.rooms[roomName]) {
+      userData = this.rooms[roomName]?.[key];
+      socketIdKey = key;
+      break;
+    }
+    let handleUserData = this.handleUserData("");
+    handleUserData(userData, socketIdKey, roomName);
+  };
+
+  handleUserData = (socket) => (userData, socketIdKey, roomName) => {
+    let id;
+    let roomId;
+    let room;
+    if (roomName && socketIdKey) {
+      id = socketIdKey;
+      roomId = roomId;
+      room = this.rooms[roomName];
+    } else {
+      id = socket.id;
+      roomId = this.playerToRoomMap[socket.id];
+      room = this.rooms[roomId];
+    }
+    const allPlayersCompletedRace = [];
+    room[id] = userData; // Store player data for the specific room and player
     let timer = this.roomsTimer?.[roomId]?.duration;
     if (timer) {
       for (const property in room) {
-        room[property].wpm = Math.floor(
-          (room[property].arrayOfwrittenWords.length / (300 - timer)) * 60
-        );
+        allPlayersCompletedRace.push(room[property].isRaceCompleted);
+        if (!room[property].isRaceCompleted) {
+          room[property].wpm = Math.floor(
+            (room[property].arrayOfwrittenWords.length / (300 - timer)) * 60
+          );
+        }
       }
     }
     // Emit the updated data for all players in the match room
     this.io.to(roomId).emit("room_players_data", room);
+    if (
+      allPlayersCompletedRace.length > 0 &&
+      allPlayersCompletedRace.every(Boolean)
+    ) {
+      this.roomsTimer[roomId].stop();
+      delete this.rooms[roomId];
+    }
   };
 
   handleDisconnect = (socket) => () => {
@@ -141,6 +218,8 @@ class GameServer {
         delete this.rooms[roomId];
       }
       this.io.to(roomId).emit("player_disconnected", socket.id);
+      // const rommPlayers = this.io.sockets.adapter.rooms.get(roomId);
+      // if (rommPlayers.size < 1) delete this.roomsCounters[this.roomId];
     }
   };
 }
