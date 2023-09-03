@@ -25,10 +25,10 @@ import { v4 } from "uuid";
 */
 
 class RoomTimer {
-  constructor(io, duration, roomName, callback) {
+  constructor(io, duration, roomName, roomDelete) {
     this.io = io;
     this.duration = duration;
-    this.callback = callback;
+    this.roomDelete = roomDelete;
     this.timerInterval = null;
     this.roomName = roomName;
   }
@@ -40,15 +40,22 @@ class RoomTimer {
       if (this.duration <= 0) {
         this.stop();
       }
-      this.callback(this.roomName);
       this.io.to(this.roomName).emit("timer_update", this.duration);
     }, 1000);
   }
+  gameEnded() {
+    this.clearTimer();
+    this.io.to(this.roomName).emit("game_completed", "game completed");
+  }
 
   stop() {
+    this.clearTimer();
+    this.io.to(this.roomName).emit("time_up", "time_up");
+  }
+  clearTimer() {
     clearInterval(this.timerInterval);
     this.timerInterval = null;
-    this.io.to(this.roomName).emit("time_up", "time_up");
+    this.roomDelete(this.roomName);
   }
 }
 
@@ -76,7 +83,7 @@ class RoomStartCounter {
     clearInterval(this.timerInterval);
     this.timerInterval = null;
     this.callback(this.roomName);
-    // this.io.to(this.roomName).emit("players_left", "Only you are in the Room");
+    this.io.to(this.roomName).emit("players_left", "Only you are in the Room");
   }
 }
 
@@ -114,7 +121,6 @@ class GameServer {
         this.waitingPlayers.delete(player);
       }
       this.rooms[matchRoomName] = {};
-
       players.forEach((player) => {
         this.playerToRoomMap[player] = matchRoomName;
         this.io.sockets.sockets.get(player).join(matchRoomName);
@@ -141,7 +147,7 @@ class GameServer {
           this.io,
           300,
           matchRoomName,
-          this.hndlRomScndsTim
+          this.handleRoomDelete
         );
         this.roomsTimer[matchRoomName].start();
       });
@@ -155,52 +161,38 @@ class GameServer {
     this.io.to(roomId).emit("counting_completed", "countingIsCompleted");
   };
 
-  hndlRomScndsTim = (roomName) => {
-    let userData;
-    let socketIdKey;
-    for (const key in this.rooms[roomName]) {
-      userData = this.rooms[roomName]?.[key];
-      socketIdKey = key;
-      break;
-    }
-    let handleUserData = this.handleUserData("");
-    handleUserData(userData, socketIdKey, roomName);
+  handleRoomDelete = (roomName) => {
+    delete this.rooms[roomName];
   };
 
-  handleUserData = (socket) => (userData, socketIdKey, roomName) => {
-    let id;
-    let roomId;
-    let room;
-    if (roomName && socketIdKey) {
-      id = socketIdKey;
-      roomId = roomId;
-      room = this.rooms[roomName];
-    } else {
-      id = socket.id;
-      roomId = this.playerToRoomMap[socket.id];
-      room = this.rooms[roomId];
-    }
-    const allPlayersCompletedRace = [];
-    room[id] = userData; // Store player data for the specific room and player
-    let timer = this.roomsTimer?.[roomId]?.duration;
-    if (timer) {
-      for (const property in room) {
-        allPlayersCompletedRace.push(room[property].isRaceCompleted);
-        if (!room[property].isRaceCompleted) {
-          room[property].wpm = Math.floor(
-            (room[property].arrayOfwrittenWords.length / (300 - timer)) * 60
-          );
+  handleUserData = (socket) => (userData) => {
+    try {
+      let id = socket.id;
+      let roomId = this.playerToRoomMap[socket.id];
+      let room = this.rooms[roomId];
+      const allPlayersCompletedRace = [];
+      room[id] = userData; // Store player data for the specific room and player
+      let timer = this.roomsTimer?.[roomId]?.duration;
+      if (timer) {
+        for (const property in room) {
+          allPlayersCompletedRace.push(room[property].isRaceCompleted);
+          if (!room[property].isRaceCompleted) {
+            room[property].wpm = Math.floor(
+              (room[property].arrayOfwrittenWords.length / (300 - timer)) * 60
+            );
+          }
         }
       }
-    }
-    // Emit the updated data for all players in the match room
-    this.io.to(roomId).emit("room_players_data", room);
-    if (
-      allPlayersCompletedRace.length > 0 &&
-      allPlayersCompletedRace.every(Boolean)
-    ) {
-      this.roomsTimer[roomId].stop();
-      delete this.rooms[roomId];
+      // Emit the updated data for all players in the match room
+      this.io.to(roomId).emit("room_players_data", room);
+      if (
+        allPlayersCompletedRace.length > 0 &&
+        allPlayersCompletedRace.every(Boolean)
+      ) {
+        this.roomsTimer[roomId].gameEnded(roomId);
+      }
+    } catch (err) {
+      console.log(err);
     }
   };
 
@@ -213,9 +205,13 @@ class GameServer {
     const isUserInRoom = this.rooms?.[roomId]?.[socket.id];
     if (isUserInRoom) {
       delete this.rooms?.[roomId]?.[socket.id];
-
-      if (Object.keys(this.rooms[roomId]).length === 0) {
+      const roomPlayersLength = Object.keys(this.rooms[roomId]).length;
+      if (roomPlayersLength === 0) {
         delete this.rooms[roomId];
+      }
+      if (roomPlayersLength === 1) {
+        if (this.roomsCounters?.[roomId]) this.roomsCounters?.[roomId].stop();
+        delete this.roomsTimer?.[roomId];
       }
       this.io.to(roomId).emit("player_disconnected", socket.id);
       // const rommPlayers = this.io.sockets.adapter.rooms.get(roomId);

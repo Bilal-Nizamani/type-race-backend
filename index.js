@@ -20,6 +20,7 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
   },
 });
+
 const gameServer = new GameServer(io);
 
 const serverIsRunning = () => {
