@@ -25,10 +25,10 @@ import { v4 } from "uuid";
 */
 
 class RoomTimer {
-  constructor(io, duration, roomName, roomDelete) {
+  constructor(io, duration, roomName, endGame) {
     this.io = io;
     this.duration = duration;
-    this.roomDelete = roomDelete;
+    this.endGame = endGame;
     this.timerInterval = null;
     this.roomName = roomName;
   }
@@ -55,7 +55,7 @@ class RoomTimer {
   clearTimer() {
     clearInterval(this.timerInterval);
     this.timerInterval = null;
-    this.roomDelete(this.roomName);
+    this.endGame(this.roomName);
   }
 }
 
@@ -67,11 +67,16 @@ class RoomManager {
     this.activeRooms = new Map(); // Store active rooms
     this.playersData = new Map();
     this.roomCounters = new Map();
+    this.roomsTimers = new Map();
+    this.raceText =
+      "In the heart of a bustling city, where the neon lights never sleep and the streets echo with ";
+    this.playingPlayersData = new Map();
     this.allStatus = {
       countDown: "count-down",
       waiting: "waiting",
       completed: "completed",
       inGame: "in-games",
+      idle: "idle",
     };
   }
 
@@ -110,7 +115,6 @@ class RoomManager {
 
     return false;
   }
-
   /**
    * Allows a player with the specified socketId to join a room with the given roomId.
    * @param {string} roomId - The ID of the room to join.
@@ -122,7 +126,7 @@ class RoomManager {
 
     // Check if the room is not full and the user is not already in the room
     // Emit a "player_joined" event to notify clients in the room that a player has joined
-    this.io.to(roomId).emit("player-joined", socketId);
+    this.io.to(roomId).emit("player_joined", socketId);
   }
 
   leaveRoom(socketId, socket) {
@@ -153,7 +157,7 @@ class RoomManager {
       room.players.delete(socketId);
 
       // Notify clients in the room that the player left
-      this.io.to(roomId).emit("player-left", socketId);
+      this.io.to(roomId).emit("player_left", socketId);
 
       // If the player was in "count-down" status and there's only one player left in the room
       if (isWaitingRoom && room.players.size === 1) {
@@ -178,6 +182,8 @@ class RoomManager {
 
   startGame(roomId) {
     const room = this.waitingRooms.get(roomId);
+    const roomTimer = new RoomTimer(this.io, 200, this.endGame);
+    this.roomsTimers.set(roomId, roomTimer);
     if (room) {
       room.status = this.allStatus.inGame;
       room.timer = this.allStatus.completed;
@@ -191,8 +197,10 @@ class RoomManager {
   endGame(roomId) {
     const room = this.activeRooms.get(roomId);
     if (room) {
-      room.status = this.allStatus.completed;
-      this.setPlayersStatus(room, this.allStatus.completed);
+      this.roomsTimers.delete(roomId);
+      this.setPlayersStatus(room, this.allStatus.idle);
+      this.io.sockets.adapter.rooms.delete(roomId);
+      this.activeRooms.delete(roomId);
     }
   }
 
@@ -218,18 +226,28 @@ class RoomManager {
 
   startCountdown(roomId) {
     const room = this.waitingRooms.get(roomId);
+
     if (room && room.players.size > 1) {
       this.setPlayersStatus(room, this.allStatus.countDown);
+      let plyrData = {};
+      room.players.forEach((playerId) => {
+        plyrData[playerId] = {};
+      });
+      this.playingPlayersData.set(room, plyrData);
     }
+
     if (room && room.players.size > 1 && !room.timer) {
       // Check if there are more than one player and the timer is not already running
       room.status = this.allStatus.countDown;
+
       room.timer = 10;
+      this.io.to(roomId).emit("match_found", this.raceText);
+      console.log("counter");
 
       this.roomCounters.set(
         roomId,
         setInterval(() => {
-          this.io.to(roomId).emit("countdown-timer", room.timer);
+          this.io.to(roomId).emit("countdown_timer", room.timer);
 
           if (room.timer === 0) {
             clearInterval(this.roomCounters.get(roomId));
@@ -282,9 +300,7 @@ class RoomManager {
 class GameServer {
   constructor(io, roomCapacity) {
     this.io = io;
-    this.roomsManager = new RoomManager(io, roomCapacity);
-    this.roomTimers = new Map(); // Mapping of room IDs to timers
-
+    this.roomsManager = new RoomManager(io, roomCapacity); // Mapping of room IDs to timers
     io.on("connection", (socket) => {
       socket.on("user_ready_to_play", () => this.handleUserReadyToPlay(socket));
       socket.on("disconnect", () => this.handleDisconnect(socket));
@@ -305,31 +321,42 @@ class GameServer {
   }
 
   handleUserData = (socket) => (userData) => {
-    this.roomsManager.activeRooms;
     try {
       let id = socket.id;
-      let roomId = this.playerToRoomMap[socket.id];
-      let room = this.rooms[roomId];
-      const allPlayersCompletedRace = [];
-      room[id] = userData; // Store player data for the specific room and player
-      let timer = this.roomsTimer?.[roomId]?.duration;
-      if (timer) {
-        for (const property in room) {
-          allPlayersCompletedRace.push(room[property].isRaceCompleted);
-          if (!room[property].isRaceCompleted) {
-            room[property].wpm = Math.floor(
-              (room[property].arrayOfwrittenWords.length / (300 - timer)) * 60
-            );
+      let player = this.roomsManager.playersData.get(id);
+      if (
+        player.status === this.roomsManager.allStatus.inGame ||
+        player.status === this.roomsManager.allStatus.countDown
+      ) {
+        let roomId = player.roomId;
+        let playerData = this.roomsManager.playingPlayersData.get(roomId);
+        const allPlayersCompletedRace = [];
+        this.roomsManager.playingPlayersData.set(roomId, {
+          ...playerData,
+          ...userData,
+        });
+        userData; // Store player data for the specific room and player
+        let timer = this.roomsManager.roomsTimers.get(roomId);
+        if (timer) {
+          const duration = timer.duration;
+          for (const property in room) {
+            allPlayersCompletedRace.push(room[property].isRaceCompleted);
+            if (!room[property].isRaceCompleted) {
+              room[property].wpm = Math.floor(
+                (room[property].arrayOfwrittenWords.length / (300 - duration)) *
+                  60
+              );
+            }
           }
         }
-      }
-      // Emit the updated data for all players in the match room
-      this.io.to(roomId).emit("room_players_data", room);
-      if (
-        allPlayersCompletedRace.length > 0 &&
-        allPlayersCompletedRace.every(Boolean)
-      ) {
-        this.roomsTimer[roomId].gameEnded(roomId);
+        // Emit the updated data for all players in the match room
+        this.io.to(roomId).emit("room_players_data", room);
+        if (
+          allPlayersCompletedRace.length > 0 &&
+          allPlayersCompletedRace.every(Boolean)
+        ) {
+          this.roomsManager.roomsTimers.get(roomId).gameEnded(roomId);
+        }
       }
     } catch (err) {
       console.log(err);
