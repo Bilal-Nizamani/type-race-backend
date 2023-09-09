@@ -102,6 +102,7 @@ class RoomManager {
         status: "waiting",
         roomId: newRoomId,
       });
+      this.io.to(socketId).emit("waiting");
     }
   }
   isInRoom(socketId) {
