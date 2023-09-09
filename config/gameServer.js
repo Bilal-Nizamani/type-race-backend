@@ -51,7 +51,6 @@ class RoomTimer {
 
   stop() {
     this.io.to(this.roomName).emit("time_up", "time_up");
-    console.log("asdf");
     this.clearTimer();
   }
   clearTimer() {
@@ -188,7 +187,7 @@ class RoomManager {
 
   startGame(roomId) {
     const room = this.waitingRooms.get(roomId);
-    const roomTimer = new RoomTimer(this.io, 4, roomId, this.endGame);
+    const roomTimer = new RoomTimer(this.io, 200, roomId, this.endGame);
     this.roomsTimers.set(roomId, roomTimer);
 
     this.io.to(roomId).emit("counting_completed", {});
@@ -350,7 +349,7 @@ class GameServer {
             if (!playerData[property].isRaceCompleted) {
               playerData[property].wpm = Math.floor(
                 (playerData[property].arrayOfwrittenWords.length /
-                  (300 - duration)) *
+                  (200 - duration)) *
                   60
               );
             }
@@ -362,7 +361,6 @@ class GameServer {
           allPlayersCompletedRace.length > 0 &&
           allPlayersCompletedRace.every(Boolean)
         ) {
-          console.log(allPlayersCompletedRace);
           this.roomsManager.roomsTimers.get(roomId).gameEnded(roomId);
         }
       }
