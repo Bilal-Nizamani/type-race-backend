@@ -1,4 +1,5 @@
 import { v4 } from "uuid";
+import EventEmitter from "events";
 
 /** 
 * ?SOCKET.IO REQUEST
@@ -25,12 +26,13 @@ import { v4 } from "uuid";
 */
 
 class RoomTimer {
-  constructor(io, duration, roomName, endGame) {
+  constructor(io, duration, roomName, endGame, eventEmitter) {
     this.io = io;
     this.duration = duration;
     this.endGame = endGame;
     this.timerInterval = null;
     this.roomName = roomName;
+    this.eventEmitter = eventEmitter; // Create an event emitter
   }
 
   start() {
@@ -38,6 +40,12 @@ class RoomTimer {
       this.duration--;
 
       this.io.to(this.roomName).emit("timer_update", this.duration);
+
+      // node.js event emitter that emitted every second for every room
+      this.eventEmitter.emit("timerChanged", {
+        duration: this.duration,
+        roomName: this.roomName,
+      });
 
       if (this.duration <= 0) {
         this.stop();
@@ -69,6 +77,7 @@ class RoomManager {
     this.playersData = new Map();
     this.roomCounters = new Map();
     this.roomsTimers = new Map();
+    this.roomsSecondEventEmitter = {};
     this.raceText =
       "In the heart of a bustling city, where the neon lights never sleep and the streets echo with ";
     this.playingPlayersData = new Map();
@@ -188,7 +197,17 @@ class RoomManager {
 
   startGame(roomId) {
     const room = this.waitingRooms.get(roomId);
-    const roomTimer = new RoomTimer(this.io, 200, roomId, this.endGame);
+    this.roomsSecondEventEmitter[roomId] = {};
+    let roomSecondEvent = this.roomsSecondEventEmitter[roomId];
+    roomSecondEvent.eventEmitter = new EventEmitter();
+    roomSecondEvent.listenerAdded = false;
+    const roomTimer = new RoomTimer(
+      this.io,
+      200,
+      roomId,
+      this.endGame,
+      roomSecondEvent.eventEmitter
+    );
     this.roomsTimers.set(roomId, roomTimer);
 
     this.io.to(roomId).emit("counting_completed", {});
@@ -316,6 +335,7 @@ class GameServer {
       socket.on("player_data", (userData) =>
         this.handlePlayerData(socket, userData)
       );
+      // Listen for the 'timerChanged' event
     });
   }
 
@@ -329,35 +349,81 @@ class GameServer {
     this.roomsManager.leaveRoom(socket.id, socket);
   }
 
+  handPlayerDataWpm(duration, roomId) {
+    let playersData = this.roomsManager.playingPlayersData.get(roomId);
+
+    let allPlayersCompletedRace = [];
+    for (const property in playersData) {
+      allPlayersCompletedRace.push(playersData[property].isRaceCompleted);
+      if (
+        !playersData[property]?.isRaceCompleted &&
+        playersData[property]?.arrayOfwrittenWords?.length > 0
+      ) {
+        playersData[property].wpm = Math.floor(
+          (playersData[property].arrayOfwrittenWords.length /
+            (200 - duration)) *
+            60
+        );
+      } else if (playersData[property]?.arrayOfwrittenWords?.length < 1) {
+        playersData[property].wpm = 0;
+      }
+    }
+    return { playersData, allPlayersCompletedRace };
+  }
+
   handlePlayerData = (socket, userData) => {
     try {
-      let id = socket.id;
-      let player = this.roomsManager.playersData.get(id);
+      const id = socket.id;
+      const player = this.roomsManager.playersData.get(id);
+
       if (
         player.status === this.roomsManager.allStatus.inGame ||
         player.status === this.roomsManager.allStatus.countDown
       ) {
-        let roomId = player.roomId;
-        const playerData = this.roomsManager.playingPlayersData.get(roomId);
-        const allPlayersCompletedRace = [];
-        playerData[id] = userData;
+        const roomId = player.roomId;
+
+        let currRoomSecondEventEmitter =
+          this.roomsManager.roomsSecondEventEmitter?.[roomId];
+
+        if (
+          currRoomSecondEventEmitter &&
+          !currRoomSecondEventEmitter?.listenerAdded
+        ) {
+          currRoomSecondEventEmitter.eventEmitter.on(
+            "timerChanged",
+            ({ duration }) => {
+              let playersData = this.handPlayerDataWpm(
+                duration,
+                roomId
+              ).playersData;
+
+              this.io.to(roomId).emit("room_players_data", playersData);
+            }
+          );
+
+          // Set the listenerAdded flag to true
+          currRoomSecondEventEmitter.listenerAdded = true;
+        }
+        // / / / / / / / / / / / / / / / /// / / / / /// / / / /
+        ///  listening to the event from room timer per second
+
+        let playersData = this.roomsManager.playingPlayersData.get(roomId);
+        let allPlayersCompletedRace = [];
+        playersData[id] = userData;
         // userData; // Store player data for the specific room and player
         let timer = this.roomsManager.roomsTimers.get(roomId);
         if (timer) {
           const duration = timer.duration;
-          for (const property in playerData) {
-            allPlayersCompletedRace.push(playerData[property].isRaceCompleted);
-            if (!playerData[property].isRaceCompleted) {
-              playerData[property].wpm = Math.floor(
-                (playerData[property].arrayOfwrittenWords.length /
-                  (200 - duration)) *
-                  60
-              );
-            }
-          }
+          const playerDataNdAllPlyrsCmpltdRace = this.handPlayerDataWpm(
+            duration,
+            roomId
+          );
+          playersData = playerDataNdAllPlyrsCmpltdRace.playersData;
+          allPlayersCompletedRace =
+            playerDataNdAllPlyrsCmpltdRace.allPlayersCompletedRace;
         }
         // Emit the updated data for all players in the match room
-        this.io.to(roomId).emit("room_players_data", playerData);
+        this.io.to(roomId).emit("room_players_data", playersData);
         if (
           allPlayersCompletedRace.length > 0 &&
           allPlayersCompletedRace.every(Boolean)
