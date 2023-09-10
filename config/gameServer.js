@@ -186,6 +186,7 @@ class RoomManager {
           this.waitingRooms.delete(roomId);
         } else if (status === this.allStatus.inGame) {
           this.activeRooms.delete(roomId);
+          this.roomsSecondEventEmitter.delete(roomId);
         }
         this.io.sockets.adapter.rooms.delete(roomId);
       }
@@ -197,10 +198,12 @@ class RoomManager {
 
   startGame(roomId) {
     const room = this.waitingRooms.get(roomId);
-    this.roomsSecondEventEmitter[roomId] = {};
-    let roomSecondEvent = this.roomsSecondEventEmitter[roomId];
-    roomSecondEvent.eventEmitter = new EventEmitter();
-    roomSecondEvent.listenerAdded = false;
+    this.roomsSecondEventEmitter.set(roomId, {
+      eventEmitter: new EventEmitter(),
+      listenerAdded: false,
+    });
+    let roomSecondEvent = this.roomsSecondEventEmitter.get(roomId);
+
     const roomTimer = new RoomTimer(
       this.io,
       200,
@@ -383,7 +386,7 @@ class GameServer {
         const roomId = player.roomId;
 
         let currRoomSecondEventEmitter =
-          this.roomsManager.roomsSecondEventEmitter?.[roomId];
+          this.roomsManager.roomsSecondEventEmitter.get(roomId);
 
         if (
           currRoomSecondEventEmitter &&
