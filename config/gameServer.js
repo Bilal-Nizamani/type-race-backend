@@ -77,7 +77,7 @@ class RoomManager {
     this.playersData = new Map();
     this.roomCounters = new Map();
     this.roomsTimers = new Map();
-    this.roomsSecondEventEmitter = {};
+    this.roomsSecondEventEmitter = new Map();
     this.raceText =
       "In the heart of a bustling city, where the neon lights never sleep and the streets echo with ";
     this.playingPlayersData = new Map();
@@ -266,14 +266,15 @@ class RoomManager {
         plyrData[playerId] = {};
       });
       this.playingPlayersData.set(roomId, plyrData);
+      this.io.to(roomId).emit("match_found", this.raceText);
     }
 
     if (room && room.players.size > 1 && !room.timer) {
       // Check if there are more than one player and the timer is not already running
       room.status = this.allStatus.countDown;
 
-      room.timer = 3;
-      this.io.to(roomId).emit("match_found", this.raceText);
+      room.timer = 15;
+      // this.io.to(roomId).emit("match_found", this.raceText);
 
       this.roomCounters.set(
         roomId,
