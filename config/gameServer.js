@@ -67,7 +67,13 @@ class RoomTimer {
     this.timerInterval = null;
   }
 }
-
+function cleanString(inputString) {
+  // Replace multiple spaces with a single space
+  let cleanedString = inputString.replace(/\s+/g, " ");
+  // Remove leading and trailing spaces
+  cleanedString = cleanedString.trim();
+  return cleanedString;
+}
 class RoomManager {
   constructor(io, roomCapacity) {
     this.io = io;
@@ -79,7 +85,7 @@ class RoomManager {
     this.roomsTimers = new Map();
     this.roomsSecondEventEmitter = new Map();
     this.raceText =
-      "In the heart of a bustling city, where the neon lights never sleep and the streets echo with ";
+      "the heart of a bustling the heart of a bustling the heart of a bustling ";
     this.playingPlayersData = new Map();
     this.allStatus = {
       countDown: "count-down",
@@ -87,6 +93,7 @@ class RoomManager {
       completed: "completed",
       inGame: "in-game",
       idle: "idle",
+      entranceClosed: "entrance-closed",
     };
   }
 
@@ -166,6 +173,13 @@ class RoomManager {
       : this.activeRooms.get(roomId);
     // Check if the room exists and the player is in it
     if (room && room.players.has(socketId)) {
+      if (status === this.allStatus.inGame) {
+        delete this.playingPlayersData.get(roomId)[socketId];
+        this.io
+          .to(roomId)
+          .emit("room_players_data", this.playingPlayersData.get(roomId));
+      }
+
       // deleting user from socket.io rooms
       socket.leave(roomId);
       // Remove the player from the room
@@ -186,6 +200,8 @@ class RoomManager {
           this.waitingRooms.delete(roomId);
         } else if (status === this.allStatus.inGame) {
           this.activeRooms.delete(roomId);
+          this.roomsTimers.get(roomId).stop();
+          this.roomsTimers.delete(roomId);
           this.roomsSecondEventEmitter.delete(roomId);
         }
         this.io.sockets.adapter.rooms.delete(roomId);
@@ -266,21 +282,23 @@ class RoomManager {
         plyrData[playerId] = {};
       });
       this.playingPlayersData.set(roomId, plyrData);
-      this.io.to(roomId).emit("match_found", this.raceText);
+      this.io.to(roomId).emit("match_found", cleanString(this.raceText));
     }
 
     if (room && room.players.size > 1 && !room.timer) {
       // Check if there are more than one player and the timer is not already running
       room.status = this.allStatus.countDown;
 
-      room.timer = 15;
+      room.timer = 4;
       // this.io.to(roomId).emit("match_found", this.raceText);
 
       this.roomCounters.set(
         roomId,
         setInterval(() => {
           this.io.to(roomId).emit("countdown_timer", room.timer);
-
+          if (room.timer === 3) {
+            room.status = this.allStatus.entranceClosed;
+          }
           if (room.timer === 0) {
             clearInterval(this.roomCounters.get(roomId));
             this.startGame(roomId);
@@ -336,6 +354,9 @@ class GameServer {
     io.on("connection", (socket) => {
       socket.on("user_ready_to_play", () => this.handleUserReadyToPlay(socket));
       socket.on("disconnect", () => this.handleDisconnect(socket));
+      socket.on("leave_room", () => {
+        this.handleLeaveRoom(socket);
+      });
       socket.on("player_data", (userData) =>
         this.handlePlayerData(socket, userData)
       );
@@ -347,6 +368,10 @@ class GameServer {
     // Delegate room management to the RoomManager
     this.roomsManager.userReadyToPlay(socket);
   }
+  handleLeaveRoom(socket) {
+    this.roomsManager.leaveRoom(socket.id, socket);
+    socket.emit("room_left", "");
+  }
 
   handleDisconnect(socket) {
     // Delegate disconnect handling to the RoomManager
@@ -355,34 +380,30 @@ class GameServer {
 
   handPlayerDataWpm(duration, roomId) {
     let playersData = this.roomsManager.playingPlayersData.get(roomId);
-
     let allPlayersCompletedRace = [];
     for (const property in playersData) {
-      allPlayersCompletedRace.push(playersData[property].isRaceCompleted);
-      if (
-        !playersData[property]?.isRaceCompleted &&
-        playersData[property]?.arrayOfwrittenWords?.length > 0
-      ) {
-        playersData[property].wpm = Math.floor(
-          (playersData[property].arrayOfwrittenWords.length /
-            (200 - duration)) *
-            60
+      let plData = playersData[property];
+      allPlayersCompletedRace.push(plData.isRaceCompleted);
+
+      if (!plData?.isRaceCompleted && plData?.arrayOfwrittenWords?.length > 0) {
+        plData.wpm = Math.floor(
+          (plData.arrayOfwrittenWords.length / (200 - duration)) * 60
         );
       } else if (playersData[property]?.arrayOfwrittenWords?.length < 1) {
         playersData[property].wpm = 0;
       }
     }
+
     return { playersData, allPlayersCompletedRace };
   }
-
   handlePlayerData = (socket, userData) => {
     try {
       const id = socket.id;
       const player = this.roomsManager.playersData.get(id);
 
       if (
-        player.status === this.roomsManager.allStatus.inGame ||
-        player.status === this.roomsManager.allStatus.countDown
+        player?.status === this.roomsManager.allStatus.inGame ||
+        player?.status === this.roomsManager.allStatus.countDown
       ) {
         const roomId = player.roomId;
 
@@ -410,11 +431,9 @@ class GameServer {
         }
         // / / / / / / / / / / / / / / / /// / / / / /// / / / /
         ///  listening to the event from room timer per second
-
         let playersData = this.roomsManager.playingPlayersData.get(roomId);
         let allPlayersCompletedRace = [];
         playersData[id] = userData;
-        // userData; // Store player data for the specific room and player
         let timer = this.roomsManager.roomsTimers.get(roomId);
         if (timer) {
           const duration = timer.duration;
@@ -426,8 +445,10 @@ class GameServer {
           allPlayersCompletedRace =
             playerDataNdAllPlyrsCmpltdRace.allPlayersCompletedRace;
         }
+
         // Emit the updated data for all players in the match room
         this.io.to(roomId).emit("room_players_data", playersData);
+
         if (
           allPlayersCompletedRace.length > 0 &&
           allPlayersCompletedRace.every(Boolean)
@@ -442,3 +463,4 @@ class GameServer {
 }
 
 export default GameServer;
+export { RoomManager, RoomTimer };
