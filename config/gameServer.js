@@ -84,8 +84,7 @@ class RoomManager {
     this.roomCounters = new Map();
     this.roomsTimers = new Map();
     this.roomsSecondEventEmitter = new Map();
-    this.raceText =
-      "the heart of a bustling the heart of a bustling the heart of a bustling ";
+    this.raceText = "the heart of a bustling the  ";
     this.playingPlayersData = new Map();
     this.allStatus = {
       countDown: "count-down",
@@ -396,6 +395,17 @@ class GameServer {
 
     return { playersData, allPlayersCompletedRace };
   }
+  updatePlacesBasedOnWPM(data) {
+    const participants = Object.keys(data);
+
+    participants.sort((a, b) => data[b].wpm - data[a].wpm);
+
+    for (let i = 0; i < participants.length; i++) {
+      data[participants[i]].place = i + 1;
+    }
+
+    return data;
+  }
   handlePlayerData = (socket, userData) => {
     try {
       const id = socket.id;
@@ -453,6 +463,13 @@ class GameServer {
           allPlayersCompletedRace.length > 0 &&
           allPlayersCompletedRace.every(Boolean)
         ) {
+          this.io
+            .to(roomId)
+            .emit(
+              "room_players_data",
+              this.updatePlacesBasedOnWPM(playersData)
+            );
+
           this.roomsManager.roomsTimers.get(roomId).gameEnded(roomId);
         }
       }
