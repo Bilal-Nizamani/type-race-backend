@@ -7,15 +7,19 @@
  room_players_data ||| emits when ever all users data when ever data is changed
 */
 
+import ManualRoomManager from "./ManualRoomManager.js";
 import RoomManager from "./RoomManager.js";
 
 class GameServer {
   constructor(io, roomCapacity) {
     this.io = io;
+    this.manualRoomManager = new ManualRoomManager(io, 5);
     this.roomsManager = new RoomManager(io, roomCapacity); // Mapping of room IDs to timers
     io.on("connection", (socket) => {
+      console.log(socket.id);
       socket.on("user_ready_to_play", () => this.handleUserReadyToPlay(socket));
       socket.on("disconnect", () => this.handleDisconnect(socket));
+
       socket.on("leave_room", () => {
         this.handleLeaveRoom(socket);
       });
@@ -27,6 +31,7 @@ class GameServer {
   }
 
   handleUserReadyToPlay(socket) {
+    console.log("user-ready-to-play");
     // Delegate room management to the RoomManager
     this.roomsManager.userReadyToPlay(socket);
   }
@@ -37,6 +42,7 @@ class GameServer {
 
   handleDisconnect(socket) {
     // Delegate disconnect handling to the RoomManager
+    console.log("disconeted");
     this.roomsManager.leaveRoom(socket.id, socket);
   }
 

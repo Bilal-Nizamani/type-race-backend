@@ -20,7 +20,8 @@ class RoomManager {
     this.roomCounters = new Map();
     this.roomsTimers = new Map();
     this.roomsSecondEventEmitter = new Map();
-    this.raceText = "the heart of a bustling the  ";
+    this.raceText =
+      "If you push someone too hard in one direction, they're just going to run three times faster in the other direction.";
     this.playingPlayersData = new Map();
     this.allStatus = {
       countDown: "count-down",
@@ -224,7 +225,7 @@ class RoomManager {
       // Check if there are more than one player and the timer is not already running
       room.status = this.allStatus.countDown;
 
-      room.timer = 4;
+      room.timer = 10;
       // this.io.to(roomId).emit("match_found", this.raceText);
 
       this.roomCounters.set(
