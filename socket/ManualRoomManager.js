@@ -2,20 +2,20 @@ import { v4 } from "uuid";
 
 class ManualRoomManager {
   constructor(io, roomCapacity) {
-    this.io = io;
+    this.io = io.of("/manual-rooms");
 
     io.on("connection", (socket) => {
       socket.on("manual_leave_room", () => {
         this.leaveRoom(socket);
       });
-      socket.on("manual_join_room", () => {
-        this.joinRoom(socket);
+      socket.on("manual_join_room", (roomInfo) => {
+        this.joinRoom(socket, roomInfo);
       });
       socket.on("manual_start_race", () => {
-        this.startGame(socket);
+        this.startCounting(socket);
       });
-      socket.on("manual_create_room", () => {
-        this.createRoom(socket);
+      socket.on("manual_create_room", (roomInfo) => {
+        this.createRoom(socket, roomInfo);
       });
       socket.on("manual_get_all_rooms", () => {
         this.getAllRooms(socket);
@@ -30,7 +30,8 @@ class ManualRoomManager {
     });
 
     this.roomCapacity = roomCapacity || 4;
-    this.rooms = new Map(); // Store rooms
+    this.activeRooms = new Map(); // Store rooms
+    this.waitingRooms = new Map();
     this.players = new Map(); // Store player information
   }
 
@@ -39,24 +40,54 @@ class ManualRoomManager {
     console.log("new message");
   }
   // Create a room manually
-  createRoom(hostSocket) {
-    console.log("creating room");
-    // const roomId = v4(); // Generate a unique room ID using uuid/v4
-    // const room = {
-    //   id: roomId,
-    //   host: hostSocket.id,
-    //   members: new Set([hostSocket.id]),
-    //   status: "waiting", // Status: waiting, counting, inGame
-    //   gameStarted: false, // Track if the game has started
-    // };
+  createRoom(hostSocket, roomInfo) {
+    const roomId = v4(); // Generate a unique room ID using uuid/v4
+    const room = {
+      id: roomId,
+      roomName: roomInfo.roomName,
+      host: hostSocket.id,
+      members: new Set([hostSocket.id]),
+      status: "waiting", // Status: waiting, counting, inGame
+      gameStarted: false, // Track if the game has started
+      timer: null,
+      roomFull: false,
+    };
 
-    // this.rooms.set(roomId, room);
+    this.waitingRooms.set(roomId, room);
 
-    // // Notify the host that the room was created successfully
-    // hostSocket.emit("room_created", roomId);
+    // Notify the host that the room was created successfully
+    hostSocket.emit("room_created", roomInfo.roomName);
 
-    // // Join the host to the room
-    // hostSocket.join(roomId);
+    // Join the host to the room
+    hostSocket.join(roomId);
+  }
+
+  // Player can join a room
+  joinRoom(socket, roomId) {
+    console.log("joining Room");
+    const room = this.waitingRooms.get(roomId);
+
+    if (!room) {
+      // Room doesn't exist
+      socket.emit("room_not_found", roomId);
+      return;
+    }
+
+    if (room.roomFull) {
+      // Game has already started or room is full
+      socket.emit("room_full", roomId);
+      return;
+    }
+
+    //  Add the player to the room
+    room.members.add(socket.id);
+
+    //  Notify the player that they successfully joined the room
+    socket.emit("room_joined", roomId);
+    if (room.members.size >= this.roomCapacity) {
+      room.roomFull = true;
+    } // // Notify all members of the room that a new player joined
+    this.io.to(roomId).emit("player_joined", socket.id);
   }
 
   handleGetRoomMessages(socket) {
@@ -69,7 +100,6 @@ class ManualRoomManager {
 
   // Host can start the game with counting
   startGame(hostSocket, roomId) {
-    console.log("starting game");
     // const room = this.rooms.get(roomId);
     // if (!room) {
     //   // Room doesn't exist
@@ -112,33 +142,7 @@ class ManualRoomManager {
     //   countdown--;
     // }, 1000);
   }
-
-  // Player can join a room
-  joinRoom(socket, roomId) {
-    console.log("joining Room");
-    // const room = this.rooms.get(roomId);
-
-    // if (!room) {
-    //   // Room doesn't exist
-    //   socket.emit("room_not_found", roomId);
-    //   return;
-    // }
-
-    // if (room.gameStarted || room.members.size >= this.roomCapacity) {
-    //   // Game has already started or room is full
-    //   socket.emit("room_full", roomId);
-    //   return;
-    // }
-
-    // // Add the player to the room
-    // room.members.add(socket.id);
-
-    // // Notify the player that they successfully joined the room
-    // socket.emit("room_joined", roomId);
-
-    // // Notify all members of the room that a new player joined
-    // this.io.to(roomId).emit("player_joined", socket.id);
-  }
+  startCounting(hostSocket, roomId) {}
 
   // Player can leave the room
   leaveRoom(socket, roomId) {
