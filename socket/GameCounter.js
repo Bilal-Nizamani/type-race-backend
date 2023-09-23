@@ -1,10 +1,10 @@
 class GameStartCounter {
-  constructor(io, roomId, onGameStart) {
+  constructor(io, roomId, onGameStart, hostId, countseconds) {
     this.io = io;
     this.roomId = roomId;
     this.onGameStart = onGameStart;
     this.timer = null;
-    this.countdown = 10;
+    this.countdown = countseconds;
   }
 
   start() {
@@ -18,6 +18,13 @@ class GameStartCounter {
           this.countdown -= 1;
         }
       }, 1000);
+    }
+  }
+  cancelCounting(timeStoped) {
+    timeStoped();
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
     }
   }
 

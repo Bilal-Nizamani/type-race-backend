@@ -1,25 +1,51 @@
 import { v4 } from "uuid";
+import GameStartCounter from "./GameCounter.js";
 
 class ManualRoomManager {
   constructor(io, roomCapacity) {
     this.io = io.of("/manual-rooms");
 
-    io.on("connection", (socket) => {
+    this.roomCapacity = roomCapacity || 4;
+    this.activeRooms = new Map(); // Store rooms
+    this.waitingRooms = new Map();
+    this.countingRooms = new Map();
+    this.connectedPlayersInfo = new Map();
+    this.roomCounters = new Map();
+    this.players = new Map(); // Store player information
+
+    this.io.on("connection", (socket) => {
+      socket.on("disconnect", () => this.handleDisconnect(socket));
+
       socket.on("manual_leave_room", () => {
         this.leaveRoom(socket);
       });
+
       socket.on("manual_join_room", (roomInfo) => {
         this.joinRoom(socket, roomInfo);
       });
+
       socket.on("manual_start_race", () => {
         this.startCounting(socket);
       });
+      socket.on("player_info", (playerInfo) => {
+        console.log("beignCAlled");
+        let copyPlayerInfo = { ...playerInfo };
+        copyPlayerInfo["playerId"] = socket.id;
+        this.connectedPlayersInfo.set(socket.id, copyPlayerInfo);
+      });
+
       socket.on("manual_create_room", (roomInfo) => {
         this.createRoom(socket, roomInfo);
       });
-      socket.on("manual_get_all_rooms", () => {
-        this.getAllRooms(socket);
+
+      socket.on("get_all_rooms", () => {
+        socket.emit("get_rooms", {
+          activeRooms: Array.from(this.activeRooms),
+          waitingRooms: Array.from(this.waitingRooms),
+          roomsInCounting: Array.from(this.countingRooms),
+        });
       });
+
       // socket.on("manual_kick_player");
       // socket.on("manual_get_all_messages");
       socket.on("manual_new_message", () => {
@@ -28,11 +54,6 @@ class ManualRoomManager {
       // socket.on("manual_delete_message");
       // socket.on("manual_edit_message");
     });
-
-    this.roomCapacity = roomCapacity || 4;
-    this.activeRooms = new Map(); // Store rooms
-    this.waitingRooms = new Map();
-    this.players = new Map(); // Store player information
   }
 
   // new messgae
@@ -45,8 +66,8 @@ class ManualRoomManager {
     const room = {
       id: roomId,
       roomName: roomInfo.roomName,
-      host: hostSocket.id,
-      members: new Set([hostSocket.id]),
+      host: this.connectedPlayersInfo.get(hostSocket.id),
+      members: {},
       status: "waiting", // Status: waiting, counting, inGame
       gameStarted: false, // Track if the game has started
       timer: null,
@@ -56,10 +77,10 @@ class ManualRoomManager {
     this.waitingRooms.set(roomId, room);
 
     // Notify the host that the room was created successfully
-    hostSocket.emit("room_created", roomInfo.roomName);
-
     // Join the host to the room
     hostSocket.join(roomId);
+    hostSocket.broadcast.emit("new_room_added", room);
+    hostSocket.emit("room_created", room);
   }
 
   // Player can join a room
@@ -92,10 +113,6 @@ class ManualRoomManager {
 
   handleGetRoomMessages(socket) {
     socket.emit("get_all_messages");
-  }
-
-  handleGetAllRooms(socket) {
-    socket.emit("get_all_rooms");
   }
 
   // Host can start the game with counting
@@ -142,7 +159,28 @@ class ManualRoomManager {
     //   countdown--;
     // }, 1000);
   }
-  startCounting(hostSocket, roomId) {}
+
+  startCounting(hostSocket, roomId) {
+    let room = this.waitingRooms.get(roomId);
+    if (room && room.hostId === hostSocket.id) {
+      this.countingRooms.set(roomId, room);
+      this.waitingRooms.delete(roomId);
+      this.roomCounters.set(
+        roomId,
+        new GameStartCounter(this.io, roomId, this.startGame, hostSocket.id, 10)
+      );
+    }
+  }
+
+  stopCounting(hostSocket, roomId) {
+    let room = this.countingRooms.get(roomId);
+
+    if (room && hostSocket.id === room.hostId) {
+      this.waitingRooms.set(roomId, room);
+      this.countingRooms.delete(roomId);
+      this.io.emit("room_created");
+    }
+  }
 
   // Player can leave the room
   leaveRoom(socket, roomId) {
@@ -169,6 +207,12 @@ class ManualRoomManager {
     //     this.io.to(newHostId).emit("you_are_host", roomId);
     //   }
     // }
+  }
+
+  handleDisconnect(socket) {
+    // Delegate disconnect handling to the RoomManager
+    console.log("disconeted");
+    // this.roomsManager.leaveRoom(socket.id, socket);
   }
 
   // Implement other methods as needed, e.g., kickMember, etc.
