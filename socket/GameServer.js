@@ -13,10 +13,8 @@ import RoomManager from "./RoomManager.js";
 class GameServer {
   constructor(io, roomCapacity) {
     this.io = io;
-    this.manualRoomManager = new ManualRoomManager(io, 5);
-    this.roomsManager = new RoomManager(io, roomCapacity); // Mapping of room IDs to timers
     io.on("connection", (socket) => {
-      console.log(socket.id);
+      console.log("connected");
       socket.on("user_ready_to_play", () => this.handleUserReadyToPlay(socket));
       socket.on("disconnect", () => this.handleDisconnect(socket));
 
@@ -28,6 +26,8 @@ class GameServer {
       );
       // Listen for the 'timerChanged' event
     });
+    this.roomsManager = new RoomManager(io, roomCapacity); // Mapping of room IDs to timers
+    this.manualRoomManager = new ManualRoomManager(io, 5);
   }
 
   handleUserReadyToPlay(socket) {

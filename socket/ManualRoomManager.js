@@ -19,8 +19,8 @@ class ManualRoomManager {
         this.leaveRoom(socket);
       });
 
-      socket.on("manual_join_room", (roomInfo) => {
-        this.joinRoom(socket, roomInfo);
+      socket.on("manual_join_room", (roomId) => {
+        this.joinRoom(socket, roomId);
       });
 
       socket.on("manual_start_race", () => {
@@ -98,26 +98,30 @@ class ManualRoomManager {
     const room = this.waitingRooms.get(roomId);
 
     if (!room) {
-      // Room doesn't exist
       socket.emit("room_not_found", roomId);
       return;
     }
 
-    if (room.roomFull) {
+    if (room.members.length > 4) {
       // Game has already started or room is full
       socket.emit("room_full", roomId);
       return;
     }
-
+    const player = this.connectedPlayersInfo.get(socket.id);
     //  Add the player to the room
-    room.members.add(socket.id);
+    room.members[socket.id] = player;
 
     //  Notify the player that they successfully joined the room
-    socket.emit("room_joined", roomId);
-    if (room.members.size >= this.roomCapacity) {
-      room.roomFull = true;
-    } // // Notify all members of the room that a new player joined
-    this.io.to(roomId).emit("player_joined", socket.id);
+    player.status = "waiting";
+    player.roomId = roomId;
+    socket.emit("room_joined", room);
+    socket.join(roomId);
+    // / / // / // / //
+    this.io.to(room.id).emit("room_data_changed", room);
+    this.io.to(roomId).emit("someone_jonied_room", player.userName);
+    // Notify all members of the room that a new player joined
+    this.io.emit("room_data_updated", room);
+    console.log("room-joined");
   }
 
   handleGetRoomMessages(socket) {
@@ -191,23 +195,35 @@ class ManualRoomManager {
     }
   }
 
-  updateRoom(rooms, player) {
+  updateRoom(rooms, player, socket) {
     // let waitingRoom = this.waitingRooms.get(player.roomId);
     let room = rooms.get(player.roomId);
-    if (player.role === "host") {
-      const playersKeys = Object.keys(room.members);
-      if (playersKeys.length > 0) {
-        room.host = room.members[0];
-        delete room.members[0];
-        this.io.emit("host_left", room);
+    console.log("leave room");
+    if (room) {
+      if (player.role === "host") {
+        player.role = "idle";
+        const playersKeys = Object.keys(room.members);
+        if (playersKeys.length > 0) {
+          room.host = room.members[playersKeys[0]];
+          delete room.members[playersKeys[0]];
+          this.connectedPlayersInfo.get(playersKeys[0]).role = "host";
+          // host lef the room
+          this.io.to(room.id).emit("room_data_changed", room);
+          this.io.emit("room_data_updated", room);
+        } else {
+          console.log("deleting");
+          this.io.emit("room_deleted", room);
+          rooms.delete(player.roomId);
+        }
       } else {
-        console.log("deleting");
-        this.io.emit("room_deleted", room);
-        rooms.delete(player.roomId);
+        delete room.members[player.playerId];
+        // player left the room
+        this.io.to(room.id).emit("room_data_changed", room);
+        this.io.emit("room_data_updated", room);
       }
+      socket.leave(room.id);
     } else {
-      delete room.members[socket.id];
-      this.io.emit("player_left", room);
+      console.log("no room found");
     }
   }
 
@@ -220,11 +236,11 @@ class ManualRoomManager {
       // let activeRoom = this.activeRooms.get(player.roomId);
       this.updateRoom(this.activeRooms, player);
     } else if (player.status === "waiting") {
-      this.updateRoom(this.waitingRooms, player);
+      this.updateRoom(this.waitingRooms, player, socket);
 
       player.status = "not-in-room";
     } else if (player.status === "counting") {
-      updateRoom(this.countingRooms, player);
+      updateRoom(this.countingRooms, player, socket);
     } else {
       console.log("dont know what");
     }
@@ -232,6 +248,8 @@ class ManualRoomManager {
 
   handleDisconnect(socket) {
     // Delegate disconnect handling to the RoomManager
+    this.leaveRoom(socket);
+    this.connectedPlayersInfo.delete(socket.id);
     console.log("disconeted");
     // this.roomsManager.leaveRoom(socket.id, socket);
   }
