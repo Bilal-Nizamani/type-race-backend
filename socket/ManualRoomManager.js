@@ -11,6 +11,7 @@ class ManualRoomManager {
     this.countingRooms = new Map();
     this.connectedPlayersInfo = new Map();
     this.roomCounters = new Map();
+    this.allRoomsMessages = new Map();
 
     this.io.on("connection", (socket) => {
       socket.on("disconnect", () => this.handleDisconnect(socket));
@@ -51,18 +52,28 @@ class ManualRoomManager {
 
       // socket.on("manual_kick_player");
       // socket.on("manual_get_all_messages");
-      socket.on("manual_new_message", () => {
-        this.handleNewMessage();
+      socket.on("manual_new_message", (message) => {
+        this.handleNewMessage(socket.id, message);
       });
       // socket.on("manual_delete_message");
       // socket.on("manual_edit_message");
     });
   }
 
-  // new messgae
-  handleNewMessage() {
-    console.log("new message");
+  // new message
+  handleNewMessage(sockeId, message) {
+    let player = this.connectedPlayersInfo.get(sockeId);
+    console.log(player);
+    let updatedMessage = {
+      playerId: player.playerId,
+      name: player.name,
+      message: message,
+      userName: player.userName,
+    };
+    this.allRoomsMessages.get(player.roomId).push(updatedMessage);
+    this.io.to(player.roomId).emit("new_message_added", updatedMessage);
   }
+
   // Create a room manually
   createRoom(hostSocket, roomInfo) {
     let hostData = this.connectedPlayersInfo.get(hostSocket.id);
@@ -81,7 +92,7 @@ class ManualRoomManager {
       timer: null,
       roomFull: false,
     };
-
+    this.allRoomsMessages.set(roomId, []);
     this.waitingRooms.set(roomId, room);
 
     // Notify the host that the room was created successfully
@@ -231,18 +242,21 @@ class ManualRoomManager {
   leaveRoom(socket) {
     console.log("leaving room");
     let player = this.connectedPlayersInfo.get(socket.id);
+    if (player) {
+      if (player.status === "in-game") {
+        // let activeRoom = this.activeRooms.get(player.roomId);
+        this.updateRoom(this.activeRooms, player);
+      } else if (player.status === "waiting") {
+        this.updateRoom(this.waitingRooms, player, socket);
 
-    if (player.status === "in-game") {
-      // let activeRoom = this.activeRooms.get(player.roomId);
-      this.updateRoom(this.activeRooms, player);
-    } else if (player.status === "waiting") {
-      this.updateRoom(this.waitingRooms, player, socket);
-
-      player.status = "not-in-room";
-    } else if (player.status === "counting") {
-      updateRoom(this.countingRooms, player, socket);
+        player.status = "not-in-room";
+      } else if (player.status === "counting") {
+        updateRoom(this.countingRooms, player, socket);
+      } else {
+        console.log("dont know what");
+      }
     } else {
-      console.log("dont know what");
+      console.log("no player");
     }
   }
 
