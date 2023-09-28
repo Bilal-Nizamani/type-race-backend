@@ -29,7 +29,6 @@ class ManualRoomManager {
       });
 
       socket.on("player_info", (playerInfo) => {
-        console.log("beignCAlled");
         let copyPlayerInfo = { ...playerInfo };
         copyPlayerInfo["playerId"] = socket.id;
         copyPlayerInfo["status"] = "not-in-room";
@@ -204,15 +203,19 @@ class ManualRoomManager {
     // }, 1000);
   }
 
-  startCounting(hostSocket, roomId) {
+  startCounting(hostSocket) {
+    const host = this.connectedPlayersInfo.get(hostSocket.id).data;
+    const roomId = host.roomId;
     let room = this.waitingRooms.get(roomId);
-    if (room && room.hostId === hostSocket.id) {
+    if (room && room.host.playerId === hostSocket.id) {
+      console.log("ininininini");
       this.countingRooms.set(roomId, room);
       this.waitingRooms.delete(roomId);
       this.roomCounters.set(
         roomId,
         new GameStartCounter(this.io, roomId, this.startGame, hostSocket.id, 10)
       );
+      this.roomCounters.get(roomId).start();
     }
   }
 
