@@ -1,7 +1,7 @@
 import express from "express";
 import { createServer } from "http";
 import dotenv from "dotenv";
-import GameServer from "./config/gameServer.js";
+import GameServer from "./socket/GameServer.js";
 import cors from "cors";
 import { Server } from "socket.io";
 dotenv.config();

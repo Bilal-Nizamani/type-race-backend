@@ -1,13 +1,8 @@
+import RoomTimer from "./RoomTimer.js";
 import { v4 } from "uuid";
 import EventEmitter from "events";
+import { cleanString } from "../utils/serviceFunction.js";
 
-/** 
-* ?SOCKET.IO REQUEST
-  
-*?RoomTimer    || handles every single room timer
- timer_update  ||| emits every second game duration
- time_up       ||| emits when timer is reached its duration
-*/
 /**  
 *?RoomMangaer      || handles rooms createion and joining 
   allStatus  ||| status are for the rooms and players  which state he is status is assigned to him or to the room
@@ -15,65 +10,6 @@ import EventEmitter from "events";
  this.callback ||| (1) calling call back funtion when counter is completed 
                    (2) stop function is called from GameServer Class if only one player is left in rooms
 */
-
-/** 
-*?GamerServer      || handles games mani logic
- user_ready_to_play||| emits every second game duration
- player_data       ||| emits when timer is reached its duration
- game_started      ||| it listens on game_sarted to get track of when game is started
- match_found       |||  when room length reached and room is joined it sends match_found to frontend
- room_players_data ||| emits when ever all users data when ever data is changed
-*/
-
-class RoomTimer {
-  constructor(io, duration, roomName, endGame, eventEmitter) {
-    this.io = io;
-    this.duration = duration;
-    this.endGame = endGame;
-    this.timerInterval = null;
-    this.roomName = roomName;
-    this.eventEmitter = eventEmitter; // Create an event emitter
-  }
-
-  start() {
-    this.timerInterval = setInterval(() => {
-      this.duration--;
-
-      this.io.to(this.roomName).emit("timer_update", this.duration);
-
-      // node.js event emitter that emitted every second for every room
-      this.eventEmitter.emit("timerChanged", {
-        duration: this.duration,
-        roomName: this.roomName,
-      });
-
-      if (this.duration <= 0) {
-        this.stop();
-      }
-    }, 1000);
-  }
-  gameEnded() {
-    this.io.to(this.roomName).emit("game_completed", "game completed");
-    this.clearTimer();
-  }
-
-  stop() {
-    this.io.to(this.roomName).emit("time_up", "time_up");
-    this.clearTimer();
-  }
-  clearTimer() {
-    this.endGame(this.roomName);
-    clearInterval(this.timerInterval);
-    this.timerInterval = null;
-  }
-}
-function cleanString(inputString) {
-  // Replace multiple spaces with a single space
-  let cleanedString = inputString.replace(/\s+/g, " ");
-  // Remove leading and trailing spaces
-  cleanedString = cleanedString.trim();
-  return cleanedString;
-}
 class RoomManager {
   constructor(io, roomCapacity) {
     this.io = io;
@@ -85,7 +21,7 @@ class RoomManager {
     this.roomsTimers = new Map();
     this.roomsSecondEventEmitter = new Map();
     this.raceText =
-      "the heart of a bustling the heart of a bustling the heart of a bustling ";
+      "If you push someone too hard in one direction, they're just going to run three times faster in the other direction.";
     this.playingPlayersData = new Map();
     this.allStatus = {
       countDown: "count-down",
@@ -289,7 +225,7 @@ class RoomManager {
       // Check if there are more than one player and the timer is not already running
       room.status = this.allStatus.countDown;
 
-      room.timer = 4;
+      room.timer = 10;
       // this.io.to(roomId).emit("match_found", this.raceText);
 
       this.roomCounters.set(
@@ -347,120 +283,4 @@ class RoomManager {
   }
 }
 
-class GameServer {
-  constructor(io, roomCapacity) {
-    this.io = io;
-    this.roomsManager = new RoomManager(io, roomCapacity); // Mapping of room IDs to timers
-    io.on("connection", (socket) => {
-      socket.on("user_ready_to_play", () => this.handleUserReadyToPlay(socket));
-      socket.on("disconnect", () => this.handleDisconnect(socket));
-      socket.on("leave_room", () => {
-        this.handleLeaveRoom(socket);
-      });
-      socket.on("player_data", (userData) =>
-        this.handlePlayerData(socket, userData)
-      );
-      // Listen for the 'timerChanged' event
-    });
-  }
-
-  handleUserReadyToPlay(socket) {
-    // Delegate room management to the RoomManager
-    this.roomsManager.userReadyToPlay(socket);
-  }
-  handleLeaveRoom(socket) {
-    this.roomsManager.leaveRoom(socket.id, socket);
-    socket.emit("room_left", "");
-  }
-
-  handleDisconnect(socket) {
-    // Delegate disconnect handling to the RoomManager
-    this.roomsManager.leaveRoom(socket.id, socket);
-  }
-
-  handPlayerDataWpm(duration, roomId) {
-    let playersData = this.roomsManager.playingPlayersData.get(roomId);
-    let allPlayersCompletedRace = [];
-    for (const property in playersData) {
-      let plData = playersData[property];
-      allPlayersCompletedRace.push(plData.isRaceCompleted);
-
-      if (!plData?.isRaceCompleted && plData?.arrayOfwrittenWords?.length > 0) {
-        plData.wpm = Math.floor(
-          (plData.arrayOfwrittenWords.length / (200 - duration)) * 60
-        );
-      } else if (playersData[property]?.arrayOfwrittenWords?.length < 1) {
-        playersData[property].wpm = 0;
-      }
-    }
-
-    return { playersData, allPlayersCompletedRace };
-  }
-  handlePlayerData = (socket, userData) => {
-    try {
-      const id = socket.id;
-      const player = this.roomsManager.playersData.get(id);
-
-      if (
-        player?.status === this.roomsManager.allStatus.inGame ||
-        player?.status === this.roomsManager.allStatus.countDown
-      ) {
-        const roomId = player.roomId;
-
-        let currRoomSecondEventEmitter =
-          this.roomsManager.roomsSecondEventEmitter.get(roomId);
-
-        if (
-          currRoomSecondEventEmitter &&
-          !currRoomSecondEventEmitter?.listenerAdded
-        ) {
-          currRoomSecondEventEmitter.eventEmitter.on(
-            "timerChanged",
-            ({ duration }) => {
-              let playersData = this.handPlayerDataWpm(
-                duration,
-                roomId
-              ).playersData;
-
-              this.io.to(roomId).emit("room_players_data", playersData);
-            }
-          );
-
-          // Set the listenerAdded flag to true
-          currRoomSecondEventEmitter.listenerAdded = true;
-        }
-        // / / / / / / / / / / / / / / / /// / / / / /// / / / /
-        ///  listening to the event from room timer per second
-        let playersData = this.roomsManager.playingPlayersData.get(roomId);
-        let allPlayersCompletedRace = [];
-        playersData[id] = userData;
-        let timer = this.roomsManager.roomsTimers.get(roomId);
-        if (timer) {
-          const duration = timer.duration;
-          const playerDataNdAllPlyrsCmpltdRace = this.handPlayerDataWpm(
-            duration,
-            roomId
-          );
-          playersData = playerDataNdAllPlyrsCmpltdRace.playersData;
-          allPlayersCompletedRace =
-            playerDataNdAllPlyrsCmpltdRace.allPlayersCompletedRace;
-        }
-
-        // Emit the updated data for all players in the match room
-        this.io.to(roomId).emit("room_players_data", playersData);
-
-        if (
-          allPlayersCompletedRace.length > 0 &&
-          allPlayersCompletedRace.every(Boolean)
-        ) {
-          this.roomsManager.roomsTimers.get(roomId).gameEnded(roomId);
-        }
-      }
-    } catch (err) {
-      console.log(err);
-    }
-  };
-}
-
-export default GameServer;
-export { RoomManager, RoomTimer };
+export default RoomManager;
