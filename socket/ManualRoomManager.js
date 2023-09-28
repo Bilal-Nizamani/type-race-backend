@@ -35,7 +35,8 @@ class ManualRoomManager {
         copyPlayerInfo["status"] = "not-in-room";
         copyPlayerInfo["roomId"] = null;
         copyPlayerInfo["role"] = "idle";
-        this.connectedPlayersInfo.set(socket.id, copyPlayerInfo);
+        const playerData = { socket: socket, data: copyPlayerInfo };
+        this.connectedPlayersInfo.set(socket.id, playerData);
       });
 
       socket.on("manual_create_room", (roomInfo) => {
@@ -48,6 +49,9 @@ class ManualRoomManager {
           waitingRooms: Object.fromEntries(this.waitingRooms),
           roomsInCounting: Object.fromEntries(this.countingRooms),
         });
+      });
+      socket.on("kick", (kickedPlayer) => {
+        this.handlKickPlayer(socket, kickedPlayer);
       });
 
       // socket.on("manual_kick_player");
@@ -62,8 +66,7 @@ class ManualRoomManager {
 
   // new message
   handleNewMessage(sockeId, message) {
-    let player = this.connectedPlayersInfo.get(sockeId);
-    console.log(player);
+    let player = this.connectedPlayersInfo.get(sockeId)?.data;
     let updatedMessage = {
       playerId: player.playerId,
       name: player.name,
@@ -73,11 +76,27 @@ class ManualRoomManager {
     this.allRoomsMessages.get(player.roomId).push(updatedMessage);
     this.io.to(player.roomId).emit("new_message_added", updatedMessage);
   }
+  handlKickPlayer(socket, kickedPlayer) {
+    const kickedPlayerSockect = this.connectedPlayersInfo.get(
+      kickedPlayer.playerId
+    ).socket;
+    if (
+      this.waitingRooms.get(kickedPlayer.roomId).host.playerId === socket.id
+    ) {
+      this.leaveRoom(kickedPlayerSockect, kickedPlayer.roomId);
+    } else {
+      console.log("you are not he host");
+      return;
+    }
+    kickedPlayerSockect.emit("got_kicked", "you were kicked");
+  }
 
   // Create a room manually
   createRoom(hostSocket, roomInfo) {
-    let hostData = this.connectedPlayersInfo.get(hostSocket.id);
+    let hostData = this.connectedPlayersInfo.get(hostSocket.id)?.data;
+
     if (hostData.status !== "not-in-room") return;
+
     hostData.roomId;
     const roomId = v4(); // Generate a unique room ID using uuid/v4
     hostData.roomId = roomId;
@@ -118,12 +137,13 @@ class ManualRoomManager {
       socket.emit("room_full", roomId);
       return;
     }
-    const player = this.connectedPlayersInfo.get(socket.id);
+    const player = this.connectedPlayersInfo.get(socket.id).data;
     //  Add the player to the room
     room.members[socket.id] = player;
 
     //  Notify the player that they successfully joined the room
     player.status = "waiting";
+    player.role = "in-room";
     player.roomId = roomId;
     socket.emit("room_joined", room);
     socket.join(roomId);
@@ -217,7 +237,7 @@ class ManualRoomManager {
         if (playersKeys.length > 0) {
           room.host = room.members[playersKeys[0]];
           delete room.members[playersKeys[0]];
-          this.connectedPlayersInfo.get(playersKeys[0]).role = "host";
+          this.connectedPlayersInfo.get(playersKeys[0]).data.role = "host";
           // host lef the room
           this.io.to(room.id).emit("room_data_changed", room);
           this.io.emit("room_data_updated", room);
@@ -241,7 +261,7 @@ class ManualRoomManager {
   // Player can leave the room
   leaveRoom(socket) {
     console.log("leaving room");
-    let player = this.connectedPlayersInfo.get(socket.id);
+    let player = this.connectedPlayersInfo.get(socket.id)?.data;
     if (player) {
       if (player.status === "in-game") {
         // let activeRoom = this.activeRooms.get(player.roomId);
