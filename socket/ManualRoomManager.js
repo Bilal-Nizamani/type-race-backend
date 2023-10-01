@@ -24,6 +24,10 @@ class ManualRoomManager {
         this.joinRoom(socket, roomId);
       });
 
+      socket.on("cancel_counting", () => {
+        this.handleCancelCounting(socket);
+      });
+
       socket.on("manual_start_race", () => {
         this.startCounting(socket);
       });
@@ -126,6 +130,8 @@ class ManualRoomManager {
     console.log("joining Room");
     const room = this.waitingRooms.get(roomId);
 
+    console.log(this.waitingRooms);
+    console.log(this.countingRooms);
     if (!room) {
       socket.emit("room_not_found", roomId);
       return;
@@ -203,12 +209,21 @@ class ManualRoomManager {
     // }, 1000);
   }
 
+  changeStatusHandler(room, status) {
+    Object.keys(room.members).forEach((key) => {
+      room.members[key].status = status;
+    });
+    room.host.status = status;
+    room.status = status;
+  }
+
   startCounting(hostSocket) {
-    const host = this.connectedPlayersInfo.get(hostSocket.id).data;
+    const host = this.connectedPlayersInfo.get(hostSocket.id)?.data;
     const roomId = host.roomId;
     let room = this.waitingRooms.get(roomId);
-    if (room && room.host.playerId === hostSocket.id) {
-      console.log("ininininini");
+    if (room && room.host.playerId === hostSocket.id && !room.timer) {
+      this.changeStatusHandler(room, "counting");
+
       this.countingRooms.set(roomId, room);
       this.waitingRooms.delete(roomId);
       this.roomCounters.set(
@@ -218,30 +233,51 @@ class ManualRoomManager {
       this.roomCounters.get(roomId).start();
     }
   }
-
-  stopCounting(hostSocket, roomId) {
+  handleCancelCounting(socket) {
+    let player = this.connectedPlayersInfo.get(socket.id)?.data;
+    let roomId = player.roomId;
     let room = this.countingRooms.get(roomId);
-
-    if (room && hostSocket.id === room.hostId) {
-      this.waitingRooms.set(roomId, room);
-      this.countingRooms.delete(roomId);
-      this.io.emit("room_created");
-    }
+    this.changeStatusHandler(room, "waiting");
+    this.waitingRooms.set(roomId, room);
+    this.countingRooms.delete(roomId);
+    let counter = this.roomCounters.get(roomId);
+    if (counter) counter.cancelCounting();
   }
+
+  // stopCounting(hostSocket, roomId) {
+  //   let room = this.countingRooms.get(roomId);
+
+  //   if (room && hostSocket.id === room.hostId) {
+  //     this.waitingRooms.set(roomId, room);
+  //     this.countingRooms.delete(roomId);
+  //     this.io.emit("room_created");
+  //   }
+  // }
 
   updateRoom(rooms, player, socket) {
     // let waitingRoom = this.waitingRooms.get(player.roomId);
     let room = rooms.get(player.roomId);
-    console.log("leave room");
+    const playersKeys = room?.members && Object.keys(room.members);
+
+    if (room?.status === "counting") {
+      if (playersKeys.length - 1 < 1) {
+        this.countingRooms.delete(player.roomId);
+        this.waitingRooms.set(player.roomId, room);
+      }
+      let counter = this.roomCounters.get(player.roomId);
+      if (counter) counter.cancelCounting();
+      this.changeStatusHandler(room, "waiting");
+    }
+
     if (room) {
       if (player.role === "host") {
         player.role = "idle";
-        const playersKeys = Object.keys(room.members);
         if (playersKeys.length > 0) {
           room.host = room.members[playersKeys[0]];
           delete room.members[playersKeys[0]];
           this.connectedPlayersInfo.get(playersKeys[0]).data.role = "host";
           // host lef the room
+
           this.io.to(room.id).emit("room_data_changed", room);
           this.io.emit("room_data_updated", room);
         } else {
@@ -251,7 +287,9 @@ class ManualRoomManager {
         }
       } else {
         delete room.members[player.playerId];
+
         // player left the room
+
         this.io.to(room.id).emit("room_data_changed", room);
         this.io.emit("room_data_updated", room);
       }
@@ -267,14 +305,16 @@ class ManualRoomManager {
     let player = this.connectedPlayersInfo.get(socket.id)?.data;
     if (player) {
       if (player.status === "in-game") {
-        // let activeRoom = this.activeRooms.get(player.roomId);
-        this.updateRoom(this.activeRooms, player);
+        this.updateRoom(this.activeRooms, player, socket);
+        player.status = "not-in-room";
       } else if (player.status === "waiting") {
         this.updateRoom(this.waitingRooms, player, socket);
 
         player.status = "not-in-room";
       } else if (player.status === "counting") {
-        updateRoom(this.countingRooms, player, socket);
+        console.log("deleting from couting");
+        this.updateRoom(this.countingRooms, player, socket);
+        player.status = "not-in-room";
       } else {
         console.log("dont know what");
       }
