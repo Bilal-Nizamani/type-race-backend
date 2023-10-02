@@ -22,8 +22,8 @@ class GameStartCounter {
       }, 1000);
     }
   }
-  cancelCounting(timeStoped) {
-    timeStoped();
+  cancelCounting() {
+    this.io.to(this.roomId).emit("time_stoped", "time stoped ");
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
