@@ -80,18 +80,20 @@ class ManualRoomManager {
     this.io.to(player.roomId).emit("new_message_added", updatedMessage);
   }
   handlKickPlayer(socket, kickedPlayer) {
-    const kickedPlayerSockect = this.connectedPlayersInfo.get(
-      kickedPlayer.playerId
-    ).socket;
-    if (
-      this.waitingRooms.get(kickedPlayer.roomId).host.playerId === socket.id
-    ) {
-      this.leaveRoom(kickedPlayerSockect, kickedPlayer.roomId);
-    } else {
-      console.log("you are not he host");
-      return;
+    if (this.connectedPlayersInfo.get(socket.id).data.status === "waiting") {
+      const kickedPlayerSockect = this.connectedPlayersInfo.get(
+        kickedPlayer.playerId
+      ).socket;
+      if (
+        this.waitingRooms.get(kickedPlayer.roomId).host.playerId === socket.id
+      ) {
+        this.leaveRoom(kickedPlayerSockect, kickedPlayer.roomId);
+      } else {
+        console.log("you are not he host");
+        return;
+      }
+      kickedPlayerSockect.emit("got_kicked", "you were kicked");
     }
-    kickedPlayerSockect.emit("got_kicked", "you were kicked");
   }
 
   // Create a room manually
