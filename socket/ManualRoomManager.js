@@ -12,6 +12,17 @@ class ManualRoomManager {
     this.connectedPlayersInfo = new Map();
     this.roomCounters = new Map();
     this.allRoomsMessages = new Map();
+    this.roles = {
+      host: "host",
+      idle: "idle",
+      inRoom: "in-room",
+    };
+    this.status = {
+      counting: "counting",
+      waiting: "waiting",
+      inGame: "in-game",
+      notInRoom: "not-in-room",
+    };
 
     this.io.on("connection", (socket) => {
       socket.on("disconnect", () => this.handleDisconnect(socket));
@@ -35,9 +46,9 @@ class ManualRoomManager {
       socket.on("player_info", (playerInfo) => {
         let copyPlayerInfo = { ...playerInfo };
         copyPlayerInfo["playerId"] = socket.id;
-        copyPlayerInfo["status"] = "not-in-room";
+        copyPlayerInfo["status"] = this.status.notInRoom;
         copyPlayerInfo["roomId"] = null;
-        copyPlayerInfo["role"] = "idle";
+        copyPlayerInfo["role"] = this.roles.idle;
         const playerData = { socket: socket, data: copyPlayerInfo };
         this.connectedPlayersInfo.set(socket.id, playerData);
       });
@@ -100,18 +111,18 @@ class ManualRoomManager {
   createRoom(hostSocket, roomInfo) {
     let hostData = this.connectedPlayersInfo.get(hostSocket.id)?.data;
 
-    if (hostData.status !== "not-in-room") return;
+    if (hostData.status !== this.status.notInRoom) return;
 
     hostData.roomId;
     const roomId = v4(); // Generate a unique room ID using uuid/v4
     hostData.roomId = roomId;
-    hostData.role = "host";
+    hostData.role = this.roles.host;
     const room = {
       id: roomId,
       roomName: roomInfo.roomName,
       host: hostData,
       members: {},
-      status: "waiting", // Status: waiting, counting, inGame
+      status: this.status.waiting, // Status: waiting, counting, inGame
       gameStarted: false, // Track if the game has started
       timer: null,
       roomFull: false,
@@ -124,16 +135,13 @@ class ManualRoomManager {
     hostSocket.join(roomId);
     this.io.emit("new_room_added", room);
     hostSocket.emit("room_created", room);
-    hostData.status = "waiting";
+    hostData.status = this.status.waiting;
   }
 
   // Player can join a room
   joinRoom(socket, roomId) {
-    console.log("joining Room");
     const room = this.waitingRooms.get(roomId);
 
-    console.log(this.waitingRooms);
-    console.log(this.countingRooms);
     if (!room) {
       socket.emit("room_not_found", roomId);
       return;
@@ -149,17 +157,16 @@ class ManualRoomManager {
     room.members[socket.id] = player;
 
     //  Notify the player that they successfully joined the room
-    player.status = "waiting";
-    player.role = "in-room";
+    player.status = this.status.waiting;
+    player.role = this.roles.inRoom;
     player.roomId = roomId;
     socket.emit("room_joined", room);
     socket.join(roomId);
-    // / / // / // / //
+
     this.io.to(room.id).emit("room_data_changed", room);
     this.io.to(roomId).emit("someone_jonied_room", player.userName);
     // Notify all members of the room that a new player joined
     this.io.emit("room_data_updated", room);
-    console.log("room-joined");
   }
 
   handleGetRoomMessages(socket) {
@@ -167,49 +174,22 @@ class ManualRoomManager {
   }
 
   // Host can start the game with counting
-  startGame(hostSocket, roomId) {
-    // const room = this.rooms.get(roomId);
-    // if (!room) {
-    //   // Room doesn't exist
-    //   hostSocket.emit("room_not_found", roomId);
-    //   return;
-    // }
-    // if (room.host !== hostSocket.id) {
-    //   // Only the host can start the game
-    //   hostSocket.emit("not_host", roomId);
-    //   return;
-    // }
-    // if (room.members.size < 2) {
-    //   // There must be at least two members to start the game
-    //   hostSocket.emit("not_enough_players", roomId);
-    //   return;
-    // }
-    // if (room.status === "counting") {
-    //   // Counting is already in progress
-    //   hostSocket.emit("counting_in_progress", roomId);
-    //   return;
-    // }
-    // // Set status to counting
-    // room.status = "counting";
-    // // Notify all members of the room that counting has started
-    // this.io.to(roomId).emit("counting_started");
-    // // Implement your counting logic here
-    // // You can use timers or other mechanisms for counting
-    // // For example, simulate a 3-second countdown
-    // let countdown = 3;
-    // const countdownInterval = setInterval(() => {
-    //   this.io.to(roomId).emit("countdown_timer", countdown);
-    //   if (countdown <= 0) {
-    //     // Stop the countdown and start the game
-    //     clearInterval(countdownInterval);
-    //     room.status = "inGame"; // Set status to inGame
-    //     room.gameStarted = true; // Game is now started
-    //     // Notify all members of the room that the game has started
-    //     this.io.to(roomId).emit("game_started");
-    //   }
-    //   countdown--;
-    // }, 1000);
-  }
+  startGame = (roomId) => {
+    try {
+      let room = this.countingRooms.get(roomId);
+      this.changeStatusHandler(room, this.status.inGame);
+      this.activeRooms.set(roomId, room);
+      this.countingRooms.delete(roomId);
+
+      if (!room) {
+        throw new Error("Room Does not exist");
+      }
+      this.roomCounters.get(roomId).start(3, "game-counting");
+      console.log(this.roomCounters.get(roomId).roomId);
+    } catch (err) {
+      console.log(err);
+    }
+  };
 
   changeStatusHandler(room, status) {
     Object.keys(room.members).forEach((key) => {
@@ -224,22 +204,23 @@ class ManualRoomManager {
     const roomId = host.roomId;
     let room = this.waitingRooms.get(roomId);
     if (room && room.host.playerId === hostSocket.id && !room.timer) {
-      this.changeStatusHandler(room, "counting");
+      this.changeStatusHandler(room, this.status.counting);
 
       this.countingRooms.set(roomId, room);
       this.waitingRooms.delete(roomId);
+
       this.roomCounters.set(
         roomId,
-        new GameStartCounter(this.io, roomId, this.startGame, hostSocket.id, 10)
+        new GameStartCounter(this.io, roomId, this.startGame, hostSocket.id)
       );
-      this.roomCounters.get(roomId).start();
+      this.roomCounters.get(roomId).start(3, "room-counting");
     }
   }
   handleCancelCounting(socket) {
     let player = this.connectedPlayersInfo.get(socket.id)?.data;
     let roomId = player.roomId;
     let room = this.countingRooms.get(roomId);
-    this.changeStatusHandler(room, "waiting");
+    this.changeStatusHandler(room, this.status.waiting);
     this.waitingRooms.set(roomId, room);
     this.countingRooms.delete(roomId);
     let counter = this.roomCounters.get(roomId);
@@ -261,23 +242,24 @@ class ManualRoomManager {
     let room = rooms.get(player.roomId);
     const playersKeys = room?.members && Object.keys(room.members);
 
-    if (room?.status === "counting") {
+    if (room?.status === this.status.counting) {
       if (playersKeys.length - 1 < 1) {
         this.countingRooms.delete(player.roomId);
         this.waitingRooms.set(player.roomId, room);
       }
       let counter = this.roomCounters.get(player.roomId);
       if (counter) counter.cancelCounting();
-      this.changeStatusHandler(room, "waiting");
+      this.changeStatusHandler(room, this.status.waiting);
     }
 
     if (room) {
-      if (player.role === "host") {
-        player.role = "idle";
+      if (player.role === this.roles.host) {
+        player.role = this.roles.host;
         if (playersKeys.length > 0) {
           room.host = room.members[playersKeys[0]];
           delete room.members[playersKeys[0]];
-          this.connectedPlayersInfo.get(playersKeys[0]).data.role = "host";
+          this.connectedPlayersInfo.get(playersKeys[0]).data.role =
+            this.roles.host;
           // host lef the room
 
           this.io.to(room.id).emit("room_data_changed", room);
@@ -306,17 +288,17 @@ class ManualRoomManager {
     console.log("leaving room");
     let player = this.connectedPlayersInfo.get(socket.id)?.data;
     if (player) {
-      if (player.status === "in-game") {
+      if (player.status === this.status.inGame) {
         this.updateRoom(this.activeRooms, player, socket);
-        player.status = "not-in-room";
-      } else if (player.status === "waiting") {
+        player.status = this.status.notInRoom;
+      } else if (player.status === this.status.waiting) {
         this.updateRoom(this.waitingRooms, player, socket);
 
-        player.status = "not-in-room";
-      } else if (player.status === "counting") {
+        player.status = this.status.notInRoom;
+      } else if (player.status === this.status.counting) {
         console.log("deleting from couting");
         this.updateRoom(this.countingRooms, player, socket);
-        player.status = "not-in-room";
+        player.status = this.status.notInRoom;
       } else {
         console.log("dont know what");
       }

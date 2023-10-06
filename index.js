@@ -4,6 +4,9 @@ import dotenv from "dotenv";
 import GameServer from "./socket/GameServer.js";
 import cors from "cors";
 import { Server } from "socket.io";
+
+// import setSocketRedisAdapter from "./config/setSocketRedisAdapter.js";
+
 dotenv.config();
 
 const port = process.env.PORT;
@@ -13,14 +16,12 @@ app.use(cors());
 
 const server = createServer(app);
 const corsUrl = process.env.CORS_URL;
-
 const io = new Server(server, {
   cors: {
-    origin: corsUrl,
+    origin: "*",
     methods: ["GET", "POST"],
   },
 });
-
 const gameServer = new GameServer(io);
 
 const serverIsRunning = () => {

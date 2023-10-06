@@ -70,6 +70,7 @@ class RoomManager {
 
     return false;
   }
+
   /**
    * Allows a player with the specified socketId to join a room with the given roomId.
    * @param {string} roomId - The ID of the room to join.
