@@ -2,6 +2,7 @@ import RoomTimer from "./RoomTimer.js";
 import { v4 } from "uuid";
 import EventEmitter from "events";
 import { cleanString } from "../utils/serviceFunction.js";
+import texts from "../utils/ractTexts.js";
 
 /**  
 *?RoomMangaer      || handles rooms createion and joining 
@@ -219,7 +220,12 @@ class RoomManager {
         plyrData[playerId] = {};
       });
       this.playingPlayersData.set(roomId, plyrData);
-      this.io.to(roomId).emit("match_found", cleanString(this.raceText));
+      this.io
+        .to(roomId)
+        .emit(
+          "match_found",
+          cleanString(texts[Math.floor(Math.random() * texts.length)])
+        );
     }
 
     if (room && room.players.size > 1 && !room.timer) {

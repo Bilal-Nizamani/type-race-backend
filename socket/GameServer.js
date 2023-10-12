@@ -7,7 +7,7 @@
  room_players_data ||| emits when ever all users data when ever data is changed
 */
 
-import ManualRoomManager from "./ManualRoomManager.js";
+import ManualRoomGameServer from "./ManualRoomGameServer.js";
 import RoomManager from "./RoomManager.js";
 
 class GameServer {
@@ -27,7 +27,7 @@ class GameServer {
       // Listen for the 'timerChanged' event
     });
     this.roomsManager = new RoomManager(io, roomCapacity); // Mapping of room IDs to timers
-    this.manualRoomManager = new ManualRoomManager(io, 5);
+    this.manualRoomGameServer = new ManualRoomGameServer(io, 5);
   }
 
   handleUserReadyToPlay(socket) {

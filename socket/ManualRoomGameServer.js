@@ -1,8 +1,9 @@
+import ManualRoomManager from "./ManualRoomManager.js";
 class ManualRoomGameServer {
-  constructor(io, roomCapacity) {
-    this.io = io;
-    io.on("connection", (socket) => {
-      console.log("connected");
+  constructor(io) {
+    this.io = io.of("/manual-rooms");
+
+    this.io.on("connection", (socket) => {
       socket.on("disconnect", () => this.handleDisconnect(socket));
 
       socket.on("player_data", (userData) =>
@@ -10,13 +11,13 @@ class ManualRoomGameServer {
       );
       // Listen for the 'timerChanged' event
     });
-    this.manualRoomManager = new ManualRoomManager(io, 5);
+    this.manualRoomManager = new ManualRoomManager(this.io, 5);
   }
 
   handleDisconnect(socket) {
     // Delegate disconnect handling to the RoomManager
     console.log("disconeted");
-    this.manualRoomManager.leaveRoom(socket.id, socket);
+    this.manualRoomManager.leaveRoom(socket);
   }
 
   handPlayerDataWpm(duration, roomId) {
@@ -52,32 +53,32 @@ class ManualRoomGameServer {
       const player = this.manualRoomManager.connectedPlayersInfo.get(id);
 
       if (
-        player?.status === this.manualRoomManager.allStatus.inGame ||
-        player?.status === this.manualRoomManager.allStatus.countDown
+        player?.data?.status === this.manualRoomManager.status.inGame ||
+        player?.data?.status === this.manualRoomManager.status.counting
       ) {
-        const roomId = player.roomId;
+        const roomId = player.data.roomId;
 
-        // let currRoomSecondEventEmitter =
-        //   this.manualRoomManager.roomsSecondEventEmitter.get(roomId);
+        let currRoomSecondEventEmitter =
+          this.manualRoomManager.roomsSecondEventEmitter.get(roomId);
 
-        // if (
-        //   currRoomSecondEventEmitter &&
-        //   !currRoomSecondEventEmitter?.listenerAdded
-        // ) {
-        //   currRoomSecondEventEmitter.eventEmitter.on(
-        //     "timerChanged",
-        //     ({ duration }) => {
-        //       let playersData = this.handPlayerDataWpm(
-        //         duration,
-        //         roomId
-        //       ).playersData;
+        if (
+          currRoomSecondEventEmitter &&
+          !currRoomSecondEventEmitter?.listenerAdded
+        ) {
+          currRoomSecondEventEmitter.eventEmitter.on(
+            "timerChanged",
+            ({ duration }) => {
+              let playersData = this.handPlayerDataWpm(
+                duration,
+                roomId
+              ).playersData;
 
-        //       this.io.to(roomId).emit("room_players_data", playersData);
-        //     }
-        //   );
-        //   // Set the listenerAdded flag to true
-        //   currRoomSecondEventEmitter.listenerAdded = true;
-        // }
+              this.io.to(roomId).emit("room_players_data", playersData);
+            }
+          );
+          // Set the listenerAdded flag to true
+          currRoomSecondEventEmitter.listenerAdded = true;
+        }
         // / / / / / / / / / / / / / / / /// / / / / /// / / / /
         ///  listening to the event from room timer per second
         let playersData = this.manualRoomManager.playingPlayersData.get(roomId);
