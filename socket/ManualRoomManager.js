@@ -28,6 +28,7 @@ class ManualRoomManager {
       counting: "counting",
       waiting: "waiting",
       inGame: "in-game",
+      checkingResult: "checking-result",
       notInRoom: "not-in-room",
     };
 
@@ -110,30 +111,36 @@ class ManualRoomManager {
     this.io.to(player.roomId).emit("new_message_added", updatedMessage);
   }
   handlKickPlayer(socket, kickedPlayer) {
-    if (this.connectedPlayersInfo.get(socket.id).data.status === "waiting") {
-      const kickedPlayerSockect = this.connectedPlayersInfo.get(
-        kickedPlayer.playerId
-      ).socket;
-      if (
-        this.waitingRooms.get(kickedPlayer.roomId).host.playerId === socket.id
-      ) {
-        this.leaveRoom(kickedPlayerSockect, kickedPlayer.roomId);
-      } else {
-        console.log("you are not he host");
-        return;
-      }
-      kickedPlayerSockect.emit("got_kicked", "you were kicked");
+    const kickedPlayerSockect = this.connectedPlayersInfo.get(
+      kickedPlayer.playerId
+    ).socket;
+    if (
+      this.waitingRooms.get(kickedPlayer.roomId).host.playerId === socket.id
+    ) {
+      let player = this.connectedPlayersInfo.get(kickedPlayer.playerId)?.data;
+      player.status = "waiting";
+      this.leaveRoom(kickedPlayerSockect);
+    } else {
+      console.log("you are not he host");
+      return;
     }
+    kickedPlayerSockect.emit("got_kicked", "you were kicked");
   }
 
   handleGetBackToRoom(socket) {
     let player = this.connectedPlayersInfo.get(socket.id).data;
-    player.status = this.status.waiting;
+    if (!player?.roomId) {
+      socket.emit("game_left", {});
+
+      return;
+    }
     let room = this.waitingRooms.get(player.roomId);
-    if (player.role === this.roles.host) room.host.status = "waiting";
-    else room.members[socket.id].status = "waiting";
-    socket.emit("game_left", {});
+    player.status = "waiting";
+    if (player.role === "host") {
+      room.host.status = this.status.waiting;
+    } else room.members[socket.id].status = "waiting";
     this.io.emit("room_data_updated", room);
+    socket.emit("game_left", {});
   }
 
   // Create a room manually
@@ -169,6 +176,7 @@ class ManualRoomManager {
   // Player can join a room
   joinRoom(socket, roomId) {
     const room = this.waitingRooms.get(roomId);
+    if (room.roomFull) return;
 
     if (!room) {
       socket.emit("room_not_found", roomId);
@@ -183,7 +191,7 @@ class ManualRoomManager {
     const player = this.connectedPlayersInfo.get(socket.id).data;
     //  Add the player to the room
     room.members[socket.id] = player;
-
+    if (Object.keys(room.members).length > 2) room.roomFull = true;
     //  Notify the player that they successfully joined the room
     player.status = this.status.waiting;
     player.role = this.roles.inRoom;
@@ -205,7 +213,7 @@ class ManualRoomManager {
   startGame(roomId) {
     try {
       let room = this.countingRooms.get(roomId);
-      this.changeStatusHandler(room, this.status.inGame, ":starteGAmegamemgem");
+      this.changeStatusHandler(room, this.status.inGame, this.status.inGame);
       this.activeRooms.set(roomId, room);
       this.countingRooms.delete(roomId);
       let plyrData = { ...room.members, [room.host.playerId]: room.host };
@@ -232,6 +240,11 @@ class ManualRoomManager {
   endGame = (roomId) => {
     let room = this.activeRooms.get(roomId);
     if (room) {
+      this.changeStatusHandler(
+        room,
+        this.status.checkingResult,
+        this.status.waiting
+      );
       room.status = "waiting";
       this.waitingRooms.set(roomId, room);
       this.activeRooms.delete(roomId);
@@ -258,12 +271,16 @@ class ManualRoomManager {
     this.roomsTimers.get(roomId).start();
   };
 
-  changeStatusHandler(room, status, gg) {
-    Object.keys(room.members).forEach((key) => {
-      room.members[key].status = status;
-    });
-    room.host.status = status;
-    room.status = status;
+  changeStatusHandler(room, playersStatus, roomStatus) {
+    try {
+      Object.keys(room.members).forEach((key) => {
+        room.members[key].status = playersStatus;
+      });
+      room.host.status = playersStatus;
+      room.status = roomStatus;
+    } catch (err) {
+      console.log(err);
+    }
   }
 
   startCounting(hostSocket) {
@@ -271,7 +288,11 @@ class ManualRoomManager {
     const roomId = host.roomId;
     let room = this.waitingRooms.get(roomId);
     if (room && room.host.playerId === hostSocket.id && !room.timer) {
-      this.changeStatusHandler(room, this.status.counting);
+      this.changeStatusHandler(
+        room,
+        this.status.counting,
+        this.status.counting
+      );
       this.countingRooms.set(roomId, room);
 
       this.waitingRooms.delete(roomId);
@@ -285,23 +306,13 @@ class ManualRoomManager {
     let player = this.connectedPlayersInfo.get(socket.id)?.data;
     let roomId = player.roomId;
     let room = this.countingRooms.get(roomId);
-    this.changeStatusHandler(room, this.status.waiting);
+    this.changeStatusHandler(room, this.status.waiting, this.status.waiting);
     this.waitingRooms.set(roomId, room);
     this.countingRooms.delete(roomId);
     let counter = this.roomCounters.get(roomId);
     if (counter) counter.cancelCounting();
     this.io.emit("room_data_updated", room);
   }
-
-  // stopCounting(hostSocket, roomId) {
-  //   let room = this.countingRooms.get(roomId);
-
-  //   if (room && hostSocket.id === room.hostId) {
-  //     this.waitingRooms.set(roomId, room);
-  //     this.countingRooms.delete(roomId);
-  //     this.io.emit("room_created");
-  //   }
-  // }
 
   updateRoom(rooms, player, socket) {
     // let waitingRoom = this.waitingRooms.get(player.roomId);
@@ -315,10 +326,11 @@ class ManualRoomManager {
       }
       let counter = this.roomCounters.get(player.roomId);
       if (counter) counter.cancelCounting();
-      this.changeStatusHandler(room, this.status.waiting);
+      this.changeStatusHandler(room, this.status.waiting, this.status.waiting);
     }
 
     if (room) {
+      room.roomFull = false;
       if (player.role === this.roles.host) {
         player.role = this.roles.host;
         if (playersKeys.length > 0) {
@@ -327,7 +339,6 @@ class ManualRoomManager {
           this.connectedPlayersInfo.get(playersKeys[0]).data.role =
             this.roles.host;
           // host lef the room
-
           this.io.to(room.id).emit("room_data_changed", room);
           this.io.emit("room_data_updated", room);
         } else {
@@ -362,9 +373,12 @@ class ManualRoomManager {
         let playingRoom = this.playingPlayersData.get(player?.roomId);
         delete playingRoom[player.playerId];
         if (Object.keys(playingRoom).length < 1) {
-          this.playingPlayersData.delete(roomId);
+          this.playingPlayersData.delete(player.roomId);
         }
-      } else if (player.status === this.status.waiting) {
+      } else if (
+        player.status === this.status.waiting ||
+        player.status === this.status.checkingResult
+      ) {
         this.updateRoom(this.waitingRooms, player, socket);
 
         player.status = this.status.notInRoom;
@@ -375,6 +389,7 @@ class ManualRoomManager {
       } else {
         console.log("dont know what");
       }
+      player.roomId = null;
     } else {
       console.log("no player");
     }
