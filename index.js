@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import GameServer from "./socket/GameServer.js";
 import cors from "cors";
 import { Server } from "socket.io";
+import { createMongoConnection } from "./config/database.js";
 
 // import setSocketRedisAdapter from "./config/setSocketRedisAdapter.js";
 
@@ -13,15 +14,16 @@ const port = process.env.PORT;
 
 const app = express();
 app.use(cors());
-
 const server = createServer(app);
-const corsUrl = process.env.CORS_URL;
+createMongoConnection();
+
 const io = new Server(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"],
   },
 });
+
 const gameServer = new GameServer(io);
 
 const serverIsRunning = () => {
