@@ -1,23 +1,28 @@
 class GameStartCounter {
-  constructor(io, roomId, onGameStart, hostId, countseconds) {
+  constructor(io, roomId) {
     this.io = io;
     this.roomId = roomId;
-    this.onGameStart = onGameStart;
     this.timer = null;
-    this.countdown = countseconds;
   }
 
-  start() {
+  start(countdown, countingType, onGameStart) {
     if (!this.timer) {
       this.timer = setInterval(() => {
-        this.io.to(this.roomId).emit("countdown_timer", this.countdown);
-        if (this.countdown === 0) {
+        if (countingType === "room-counting")
+          this.io.to(this.roomId).emit("room_countdown_timer", countdown);
+        else this.io.to(this.roomId).emit("countdown_timer", countdown);
+
+        if (countdown === 0) {
           clearInterval(this.timer);
           this.timer = null;
-          this.onGameStart(this.roomId);
-          this.io.to(this.roomId).emit("start_game", this.countdown);
+          if (countingType === "room-counting") {
+            const roomSocket = this.io.to(this.roomId);
+            roomSocket.emit("start_game", {});
+          } else {
+            onGameStart(this.roomId);
+          }
         } else {
-          this.countdown -= 1;
+          countdown -= 1;
         }
       }, 1000);
     }
