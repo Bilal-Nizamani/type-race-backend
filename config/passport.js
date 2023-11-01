@@ -10,7 +10,6 @@ const User = UserModel("User");
 const currentDirectory = process.cwd();
 const pathToKey = path.join(currentDirectory, "id_rsa_pub.pem");
 const PUB_KEY = fs.readFileSync(pathToKey, "utf8");
-
 // At a minimum, you must pass the `jwtFromRequest` and `secretOrKey` properties
 const options = {
   jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -20,26 +19,25 @@ const options = {
 
 // app.js will pass the global passport object here, and this function will configure it
 const configurePassport = (passport) => {
-  // The JWT payload is passed into the verify callback
-  passport.use(
-    new JwtStrategy(options, (jwt_payload, done) => {
-      console.log(jwt_payload);
+  console.log("checking");
 
-      // We will assign the `sub` property on the JWT to the database ID of user
-      User.findOne({ _id: jwt_payload.sub }, (err, user) => {
-        // This flow looks familiar? It is the same as when we implemented
-        // the `passport-local` strategy
-        if (err) {
-          return done(err, false);
-        }
-        if (user) {
-          return done(null, user);
-        } else {
-          return done(null, false);
-        }
-      });
-    })
-  );
+  // The JWT payload is passed into the verify callback
+  const Strategy = new JwtStrategy(options, async (jwt_payload, done) => {
+    try {
+      const user = await User.findOne({ _id: jwt_payload.sub });
+      if (user) {
+        console.log("got user");
+        return done(null, user);
+      } else {
+        console.log("no user");
+        return done(null, false);
+      }
+    } catch (err) {
+      console.log("ererere");
+      return done(err, false);
+    }
+  });
+  passport.use(Strategy);
 };
 
 export default configurePassport;

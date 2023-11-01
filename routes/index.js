@@ -15,6 +15,7 @@ router.get(
   }
 );
 router.post("/register", function (req, res, next) {
+  console.log(req.body);
   const saltHash = genPassword(req.body.password);
 
   const salt = saltHash.salt;

@@ -8,8 +8,9 @@ import dotenv from "dotenv";
 import router from "./routes/index.js";
 import passport from "passport";
 dotenv.config();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT;
 const dbUrl = process.env.DATABASE_URL;
+const app = express();
 
 createMongoConnection(dbUrl);
 // import "./models/user";
@@ -17,9 +18,13 @@ import configurePassport from "./config/passport.js";
 configurePassport(passport);
 
 // import setSocketRedisAdapter from "./config/setSocketRedisAdapter.js";
-const app = express();
 
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(cors());
+
+// Instead of using body-parser middleware, use the new Express implementation of the same thing
+app.use(passport.initialize());
 
 const server = createServer(app);
 
