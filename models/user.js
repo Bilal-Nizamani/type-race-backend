@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 
+// Define the schema for race data
 const raceSchema = new mongoose.Schema({
   speed: {
     type: Number,
@@ -23,6 +24,7 @@ const raceSchema = new mongoose.Schema({
   },
 });
 
+// Define the schema for mode statistics
 const modeStatsSchema = new mongoose.Schema({
   mode: {
     type: String,
@@ -33,14 +35,17 @@ const modeStatsSchema = new mongoose.Schema({
     required: true,
   },
   bestRace: {
-    type: raceSchema,
+    type: Number,
+    required: true,
   },
   fullAvg: {
     type: Number,
+    required: true,
   },
   latestRaceResults: [raceSchema],
 });
 
+// Define the main user schema
 const userSchema = new mongoose.Schema({
   username: {
     type: String,
@@ -55,35 +60,44 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  createdAt: { type: Date, default: Date.now },
   WPM: {
     type: Number,
-    required: true,
+    defautl: 0,
   },
   fullAvg: {
     type: Number,
+    default: 0,
   },
+  premium: { type: Boolean, default: false },
   bestRace: {
-    type: raceSchema,
+    type: Number,
+    defuatl: 0,
   },
   races: {
     type: Number,
     default: 0,
   },
-  WPMPercentage: {
-    type: Number,
-  },
-  megaracer: {
-    type: Number,
-    default: 0,
-  },
+
   skillLevel: {
     type: String,
+    defualt: "Noobie",
   },
   expLevel: {
     type: Number,
+    default: 1,
   },
-  avatar: {
-    type: String,
+  lastFifteenGamesWpmAvrg: {
+    type: Number,
+    defulat: 0,
+  },
+  awards: {
+    type: [String], // Assuming awards are represented as strings
+    defautl: [],
+  },
+  avatars: {
+    type: [String],
+    default: ["ferari"],
   },
   modeStats: [modeStatsSchema],
 });
