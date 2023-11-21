@@ -2,7 +2,6 @@ import { validPassword, genPassword, issueJWT } from "../utils/authService.js";
 import User from "../models/user.js";
 
 const userRegisterHandler = (req, res, next) => {
-  console.log(req.body);
   const saltHash = genPassword(req.body.password);
 
   const salt = saltHash.salt;
